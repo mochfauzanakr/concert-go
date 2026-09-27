@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	"konserGo/internal/config"
-	"konserGo/internal/entity"
-	"konserGo/internal/router"
+	"concert-go/internal/config"
+	"concert-go/internal/domain/entity"
+	"concert-go/internal/routes"
 )
 
 func main() {
@@ -21,6 +21,8 @@ func main() {
 		log.Println("Running database migrations...")
 		err := config.GormDB.AutoMigrate(
 			&entity.User{},
+			&entity.Session{},
+			&entity.Role{},
 		)
 		if err != nil {
 			log.Fatalf("Migration failed: %v", err)
@@ -28,7 +30,7 @@ func main() {
 	}
 
 	// Setup Gin Router
-	r := router.SetupRouter()
+	r := routes.SetupRouter(cfg)
 
 	// Start server
 	log.Printf("Starting server on port %s...", cfg.AppPort)
