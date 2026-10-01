@@ -8,22 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type HelloHandler interface {
-	SayHello(c *gin.Context)
-}
-
-type helloHandlerImpl struct {
-	helloUsecase usecase.HelloUsecase
+type HelloHandler struct {
+	helloUsecase *usecase.HelloUsecase
 }
 
 // NewHelloHandler implements HelloHandler
-func NewHelloHandler(helloUsecase usecase.HelloUsecase) HelloHandler {
-	return &helloHandlerImpl{
+func NewHelloHandler(helloUsecase *usecase.HelloUsecase) *HelloHandler {
+	return &HelloHandler{
 		helloUsecase: helloUsecase,
 	}
 }
 
-func (h *helloHandlerImpl) SayHello(c *gin.Context) {
+func (h *HelloHandler) SayHello(c *gin.Context) {
 	msg, err := h.helloUsecase.GetGreeting()
 	if err != nil {
 		util.RespondInternalError(c)

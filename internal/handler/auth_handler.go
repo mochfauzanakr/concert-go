@@ -11,27 +11,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthHandler contract
-type AuthHandler interface {
-	Register(c *gin.Context)
-	Login(c *gin.Context)
-	RefreshToken(c *gin.Context)
-	Logout(c *gin.Context)
-	Me(c *gin.Context)
-}
-
-type authHandlerImpl struct {
-	authUsecase usecase.AuthUsecase
+type AuthHandler struct {
+	authUsecase *usecase.AuthUsecase
 }
 
 // NewAuthHandler constructor
-func NewAuthHandler(authUsecase usecase.AuthUsecase) AuthHandler {
-	return &authHandlerImpl{
+func NewAuthHandler(authUsecase *usecase.AuthUsecase) *AuthHandler {
+	return &AuthHandler{
 		authUsecase: authUsecase,
 	}
 }
 
-func (h *authHandlerImpl) Register(c *gin.Context) {
+func (h *AuthHandler) Register(c *gin.Context) {
 	var req request.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.RespondBadRequest(c, "Invalid input payload", err.Error())
@@ -54,7 +45,7 @@ func (h *authHandlerImpl) Register(c *gin.Context) {
 	util.RespondOK(c, "User registered successfully", res, nil)
 }
 
-func (h *authHandlerImpl) Login(c *gin.Context) {
+func (h *AuthHandler) Login(c *gin.Context) {
 	var req request.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.RespondBadRequest(c, "Invalid input payload", err.Error())
@@ -77,7 +68,7 @@ func (h *authHandlerImpl) Login(c *gin.Context) {
 	util.RespondOK(c, "Login successful", res, nil)
 }
 
-func (h *authHandlerImpl) RefreshToken(c *gin.Context) {
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req request.RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.RespondBadRequest(c, "Invalid input payload", err.Error())
@@ -100,7 +91,7 @@ func (h *authHandlerImpl) RefreshToken(c *gin.Context) {
 	util.RespondOK(c, "Token refreshed successfully", res, nil)
 }
 
-func (h *authHandlerImpl) Logout(c *gin.Context) {
+func (h *AuthHandler) Logout(c *gin.Context) {
 	var req request.LogoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.RespondBadRequest(c, "Invalid input payload", err.Error())
@@ -115,7 +106,7 @@ func (h *authHandlerImpl) Logout(c *gin.Context) {
 	util.RespondOK(c, "Logged out successfully", nil, nil)
 }
 
-func (h *authHandlerImpl) Me(c *gin.Context) {
+func (h *AuthHandler) Me(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)
 	if !ok {
 		util.RespondUnauthorized(c, "Unauthorized")
