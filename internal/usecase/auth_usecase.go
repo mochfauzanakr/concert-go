@@ -22,31 +22,22 @@ var (
 	ErrUserNotFound       = errors.New("user not found")
 )
 
-// AuthUsecase contract
-type AuthUsecase interface {
-	Register(ctx context.Context, req request.RegisterRequest, ipAddress, userAgent string) (*response.AuthResponse, error)
-	Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error)
-	RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error)
-	Logout(ctx context.Context, req request.LogoutRequest) error
-	GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error)
-}
-
-type authUsecaseImpl struct {
+type AuthUsecase struct {
 	userRepo    repository.UserRepository
 	sessionRepo repository.SessionRepository
 	cfg         *config.Config
 }
 
 // NewAuthUsecase constructor
-func NewAuthUsecase(userRepo repository.UserRepository, sessionRepo repository.SessionRepository, cfg *config.Config) AuthUsecase {
-	return &authUsecaseImpl{
+func NewAuthUsecase(userRepo repository.UserRepository, sessionRepo repository.SessionRepository, cfg *config.Config) *AuthUsecase {
+	return &AuthUsecase{
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
 		cfg:         cfg,
 	}
 }
 
-func (u *authUsecaseImpl) Register(ctx context.Context, req request.RegisterRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+func (u *AuthUsecase) Register(ctx context.Context, req request.RegisterRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
 	if err := util.ValidateEmailTLD(req.Email); err != nil {
 		return nil, err
 	}
@@ -89,7 +80,7 @@ func (u *authUsecaseImpl) Register(ctx context.Context, req request.RegisterRequ
 	}, nil
 }
 
-func (u *authUsecaseImpl) Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+func (u *AuthUsecase) Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
 	user, err := u.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, err
@@ -113,7 +104,7 @@ func (u *authUsecaseImpl) Login(ctx context.Context, req request.LoginRequest, i
 	}, nil
 }
 
-func (u *authUsecaseImpl) RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error) {
+func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error) {
 	tokenHash := util.HashToken(req.RefreshToken)
 	session, err := u.sessionRepo.FindByTokenHash(ctx, tokenHash)
 	if err != nil {
@@ -138,12 +129,12 @@ func (u *authUsecaseImpl) RefreshToken(ctx context.Context, req request.RefreshT
 	return u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
 }
 
-func (u *authUsecaseImpl) Logout(ctx context.Context, req request.LogoutRequest) error {
+func (u *AuthUsecase) Logout(ctx context.Context, req request.LogoutRequest) error {
 	tokenHash := util.HashToken(req.RefreshToken)
 	return u.sessionRepo.Revoke(ctx, tokenHash)
 }
 
-func (u *authUsecaseImpl) GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error) {
+func (u *AuthUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error) {
 	user, err := u.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -155,7 +146,7 @@ func (u *authUsecaseImpl) GetProfile(ctx context.Context, userID uuid.UUID) (*re
 	return &res, nil
 }
 
-func (u *authUsecaseImpl) generateAndSaveTokens(ctx context.Context, user *entity.User, ipAddress, userAgent string) (*response.TokenResponse, error) {
+func (u *AuthUsecase) generateAndSaveTokens(ctx context.Context, user *entity.User, ipAddress, userAgent string) (*response.TokenResponse, error) {
 	now := time.Now()
 	accessExpDuration := time.Duration(u.cfg.JWTAccessExpMinutes) * time.Minute
 	accessExpiresAt := now.Add(accessExpDuration).Unix()

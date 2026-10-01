@@ -10,7 +10,7 @@ import (
 	"concert-go/internal/usecase"
 )
 
-func setupAuthUsecase() usecase.AuthUsecase {
+func setupAuthUsecase() *usecase.AuthUsecase {
 	userRepo := mock.NewUserRepositoryMock()
 	sessionRepo := mock.NewSessionRepositoryMock()
 	cfg := &config.Config{

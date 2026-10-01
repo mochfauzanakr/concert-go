@@ -16,7 +16,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.RecoveryMiddleware())
 
-	api := r.Group("/api/v1")
+	api := r.Group("/api")
 	{
 		HelloRoute(api)
 		AuthRoute(api, cfg)
