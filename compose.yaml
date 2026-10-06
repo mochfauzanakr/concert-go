@@ -21,6 +21,21 @@ services:
     volumes:
       - redis_data:/data
 
+  api:
+    build: .
+    container_name: concert-go-api
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT}:8080"
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+
 volumes:
   postgres_data:
   redis_data:
