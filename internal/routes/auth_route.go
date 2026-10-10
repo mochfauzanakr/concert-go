@@ -25,6 +25,8 @@ func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
 	auth.POST("/register", authHandler.Register)
 	auth.POST("/verify-otp", authHandler.VerifyOTP)
 	auth.POST("/login", authHandler.Login)
+	auth.POST("/forgot-password", authHandler.ForgotPassword)
+	auth.POST("/reset-password", authHandler.ResetPassword)
 
 	auth.POST("/refresh", authHandler.RefreshToken)
 	auth.POST("/logout", authHandler.Logout)

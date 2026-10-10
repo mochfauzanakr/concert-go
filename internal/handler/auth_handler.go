@@ -109,10 +109,40 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	util.RespondOK(c, "Logged out successfully", nil, nil)
 }
 
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req request.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	if err := h.authUsecase.ForgotPassword(c.Request.Context(), req); err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Password reset OTP sent to your email", nil, nil)
+}
+
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req request.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	if err := h.authUsecase.ResetPassword(c.Request.Context(), req); err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Password has been reset successfully", nil, nil)
+}
+
 func (h *AuthHandler) Me(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)
 	if !ok {
-		util.RespondUnauthorized(c, "Session not found")
+		util.RespondUnauthorized(c, "Unauthorized")
 		return
 	}
 
@@ -122,5 +152,5 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 
-	util.RespondOK(c, "User profile retrieved", res, nil)
+	util.RespondOK(c, "Profile fetched successfully", res, nil)
 }

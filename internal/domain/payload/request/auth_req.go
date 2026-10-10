@@ -23,3 +23,13 @@ type VerifyOTPRequest struct {
 	Email string `json:"email" binding:"required,email,max=100"`
 	OTP   string `json:"otp" binding:"required,len=6"`
 }
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email,max=100"`
+}
+
+type ResetPasswordRequest struct {
+	Email       string `json:"email" binding:"required,email,max=100"`
+	OTP         string `json:"otp" binding:"required,len=6"`
+	NewPassword string `json:"newPassword" binding:"required,min=8,max=128"`
+}

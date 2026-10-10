@@ -186,6 +186,71 @@ func (u *AuthUsecase) Logout(ctx context.Context, req request.LogoutRequest) err
 	return u.sessionRepo.Revoke(ctx, tokenHash)
 }
 
+func (u *AuthUsecase) ForgotPassword(ctx context.Context, req request.ForgotPasswordRequest) error {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return err
+	}
+
+	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return exception.NotFound("user not found")
+	}
+
+	otp, err := generateOTP()
+	if err != nil {
+		return err
+	}
+
+	if err := u.otpRepo.SetResetOTP(ctx, req.Email, otp, 5*time.Minute); err != nil {
+		return err
+	}
+
+	if u.emailSender != nil {
+		_ = u.emailSender.SendPasswordResetOTP(req.Email, otp)
+	}
+
+	return nil
+}
+
+func (u *AuthUsecase) ResetPassword(ctx context.Context, req request.ResetPasswordRequest) error {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return err
+	}
+	if err := util.ValidatePassword(req.NewPassword); err != nil {
+		return err
+	}
+
+	storedOTP, err := u.otpRepo.GetResetOTP(ctx, req.Email)
+	if err != nil || storedOTP == "" || storedOTP != req.OTP {
+		return exception.Unauthorized("invalid or expired OTP code")
+	}
+
+	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return exception.NotFound("user not found")
+	}
+
+	hashedPassword, err := util.HashPassword(req.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	user.PasswordHash = &hashedPassword
+	if err := u.userRepo.Update(ctx, user); err != nil {
+		return err
+	}
+
+	_ = u.otpRepo.DeleteResetOTP(ctx, req.Email)
+
+	return nil
+}
+
 func (u *AuthUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error) {
 	user, err := u.userRepo.FindByID(ctx, userID)
 	if err != nil {

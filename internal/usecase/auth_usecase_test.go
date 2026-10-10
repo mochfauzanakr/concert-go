@@ -150,6 +150,74 @@ func TestAuthUsecase_Login_InvalidPassword(t *testing.T) {
 	}
 }
 
+func TestAuthUsecase_ForgotPassword_And_ResetPassword_Success(t *testing.T) {
+	uc, otpRepo := setupAuthUsecase()
+	ctx := context.Background()
+
+	// 1. Register and verify user first
+	regReq := request.RegisterRequest{
+		Name:     "Bob",
+		Email:    "bob@example.com",
+		Password: "OldPassword123!",
+	}
+	_ = uc.Register(ctx, regReq)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, regReq.Email)
+	_, _ = uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: regReq.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
+
+	// 2. Forgot password request
+	err := uc.ForgotPassword(ctx, request.ForgotPasswordRequest{Email: "bob@example.com"})
+	if err != nil {
+		t.Fatalf("expected forgot password success, got %v", err)
+	}
+
+	otp, err := otpRepo.GetResetOTP(ctx, "bob@example.com")
+	if err != nil || otp == "" {
+		t.Fatalf("expected reset OTP stored, got %v", err)
+	}
+
+	// 3. Reset password with bad OTP
+	err = uc.ResetPassword(ctx, request.ResetPasswordRequest{
+		Email:       "bob@example.com",
+		OTP:         "000000",
+		NewPassword: "NewPassword123!",
+	})
+	var appErr *exception.AppException
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for bad reset OTP, got %v", err)
+	}
+
+	// 4. Reset password with correct OTP
+	err = uc.ResetPassword(ctx, request.ResetPasswordRequest{
+		Email:       "bob@example.com",
+		OTP:         otp,
+		NewPassword: "NewPassword123!",
+	})
+	if err != nil {
+		t.Fatalf("expected reset password success, got %v", err)
+	}
+
+	// 5. Try login with old password (should fail)
+	_, err = uc.Login(ctx, request.LoginRequest{
+		Email:    "bob@example.com",
+		Password: "OldPassword123!",
+	}, "127.0.0.1", "test-agent")
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for old password, got %v", err)
+	}
+
+	// 6. Try login with new password (should succeed)
+	loginRes, err := uc.Login(ctx, request.LoginRequest{
+		Email:    "bob@example.com",
+		Password: "NewPassword123!",
+	}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("expected login with new password success, got %v", err)
+	}
+	if loginRes.User.Email != "bob@example.com" {
+		t.Errorf("expected email bob@example.com, got %s", loginRes.User.Email)
+	}
+}
+
 func TestAuthUsecase_RefreshToken_Success(t *testing.T) {
 	uc, otpRepo := setupAuthUsecase()
 	ctx := context.Background()
