@@ -2,71 +2,101 @@ package usecase
 
 import (
 	"context"
-	"errors"
+	"crypto/rand"
+	"fmt"
 	"time"
 
 	"concert-go/internal/config"
 	"concert-go/internal/domain/entity"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/domain/payload/response"
+	"concert-go/internal/exception"
 	"concert-go/internal/repository"
 	"concert-go/internal/util"
 
 	"github.com/google/uuid"
 )
 
-var (
-	ErrEmailAlreadyExists = errors.New("email already registered")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrInvalidToken       = errors.New("invalid or expired token")
-	ErrUserNotFound       = errors.New("user not found")
-)
-
 type AuthUsecase struct {
 	userRepo    repository.UserRepository
 	sessionRepo repository.SessionRepository
+	otpRepo     repository.OTPRepository
+	emailSender util.EmailSender
 	cfg         *config.Config
 }
 
 // NewAuthUsecase constructor
-func NewAuthUsecase(userRepo repository.UserRepository, sessionRepo repository.SessionRepository, cfg *config.Config) *AuthUsecase {
+func NewAuthUsecase(
+	userRepo repository.UserRepository,
+	sessionRepo repository.SessionRepository,
+	otpRepo repository.OTPRepository,
+	emailSender util.EmailSender,
+	cfg *config.Config,
+) *AuthUsecase {
 	return &AuthUsecase{
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
+		otpRepo:     otpRepo,
+		emailSender: emailSender,
 		cfg:         cfg,
 	}
 }
 
-func (u *AuthUsecase) Register(ctx context.Context, req request.RegisterRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+func (u *AuthUsecase) Register(ctx context.Context, req request.RegisterRequest) error {
 	if err := util.ValidateEmailTLD(req.Email); err != nil {
-		return nil, err
+		return err
 	}
 	if err := util.ValidatePassword(req.Password); err != nil {
-		return nil, err
+		return err
 	}
 
 	existing, err := u.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if existing != nil {
-		return nil, ErrEmailAlreadyExists
+		return exception.Conflict("email already registered")
 	}
 
 	hashedPassword, err := util.HashPassword(req.Password)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	user := &entity.User{
-		ID:           uuid.New(),
+	otp, err := generateOTP()
+	if err != nil {
+		return err
+	}
+
+	pending := &repository.PendingRegistration{
 		Name:         req.Name,
 		Email:        req.Email,
 		PasswordHash: hashedPassword,
+		OTP:          otp,
 	}
 
-	if err := u.userRepo.Create(ctx, user); err != nil {
+	if err := u.otpRepo.SetPendingRegistration(ctx, pending, 5*time.Minute); err != nil {
+		return err
+	}
+
+	if u.emailSender != nil {
+		_ = u.emailSender.SendRegistrationOTP(req.Email, req.Name, otp)
+	}
+
+	return nil
+}
+
+func (u *AuthUsecase) Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
 		return nil, err
+	}
+	if user == nil {
+		return nil, exception.Unauthorized("invalid email or password")
+	}
+
+	if user.PasswordHash == nil || !util.CheckPassword(req.Password, *user.PasswordHash) {
+		return nil, exception.Unauthorized("invalid email or password")
 	}
 
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
@@ -80,18 +110,40 @@ func (u *AuthUsecase) Register(ctx context.Context, req request.RegisterRequest,
 	}, nil
 }
 
-func (u *AuthUsecase) Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
-	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+func (u *AuthUsecase) VerifyOTP(ctx context.Context, req request.VerifyOTPRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return nil, err
+	}
+
+	pending, err := u.otpRepo.GetPendingRegistration(ctx, req.Email)
+	if err != nil || pending == nil || pending.OTP != req.OTP {
+		return nil, exception.Unauthorized("invalid or expired OTP code")
+	}
+
+	// Double check user doesn't already exist
+	existing, err := u.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, err
 	}
-	if user == nil {
-		return nil, ErrInvalidCredentials
+	if existing != nil {
+		return nil, exception.Conflict("email already registered")
 	}
 
-	if !util.CheckPassword(req.Password, user.PasswordHash) {
-		return nil, ErrInvalidCredentials
+	defaultRoleID := 4
+	user := &entity.User{
+		ID:           uuid.New(),
+		Name:         pending.Name,
+		Email:        pending.Email,
+		PasswordHash: &pending.PasswordHash,
+		Provider:     "email",
+		RoleID:       &defaultRoleID,
 	}
+
+	if err := u.userRepo.Create(ctx, user); err != nil {
+		return nil, err
+	}
+
+	_ = u.otpRepo.DeletePendingRegistration(ctx, req.Email)
 
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
 	if err != nil {
@@ -111,7 +163,7 @@ func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshToken
 		return nil, err
 	}
 	if session == nil || session.RevokedAt != nil || time.Now().After(session.ExpiresAt) {
-		return nil, ErrInvalidToken
+		return nil, exception.Unauthorized("invalid or expired token")
 	}
 
 	user, err := u.userRepo.FindByID(ctx, session.UserID)
@@ -119,7 +171,7 @@ func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshToken
 		return nil, err
 	}
 	if user == nil {
-		return nil, ErrUserNotFound
+		return nil, exception.NotFound("user not found")
 	}
 
 	// Revoke old session token
@@ -140,7 +192,7 @@ func (u *AuthUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*respon
 		return nil, err
 	}
 	if user == nil {
-		return nil, ErrUserNotFound
+		return nil, exception.NotFound("user not found")
 	}
 	res := toUserResponse(user)
 	return &res, nil
@@ -187,6 +239,15 @@ func (u *AuthUsecase) generateAndSaveTokens(ctx context.Context, user *entity.Us
 		TokenType:    "Bearer",
 		ExpiresIn:    int(accessExpDuration.Seconds()),
 	}, nil
+}
+
+func generateOTP() (string, error) {
+	var b [3]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	num := (int(b[0])<<16 | int(b[1])<<8 | int(b[2])) % 1000000
+	return fmt.Sprintf("%06d", num), nil
 }
 
 func toUserResponse(user *entity.User) response.UserResponse {

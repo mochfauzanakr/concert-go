@@ -18,3 +18,8 @@ type RefreshTokenRequest struct {
 type LogoutRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
+
+type VerifyOTPRequest struct {
+	Email string `json:"email" binding:"required,email,max=100"`
+	OTP   string `json:"otp" binding:"required,len=6"`
+}

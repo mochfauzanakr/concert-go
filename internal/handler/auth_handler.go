@@ -1,8 +1,7 @@
 package handler
 
 import (
-	"errors"
-
+	"concert-go/internal/config"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/middleware"
 	"concert-go/internal/usecase"
@@ -16,7 +15,7 @@ type AuthHandler struct {
 }
 
 // NewAuthHandler constructor
-func NewAuthHandler(authUsecase *usecase.AuthUsecase) *AuthHandler {
+func NewAuthHandler(authUsecase *usecase.AuthUsecase, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
 		authUsecase: authUsecase,
 	}
@@ -29,20 +28,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	ipAddress := c.ClientIP()
-	userAgent := c.Request.UserAgent()
-
-	res, err := h.authUsecase.Register(c.Request.Context(), req, ipAddress, userAgent)
+	err := h.authUsecase.Register(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, usecase.ErrEmailAlreadyExists) {
-			util.RespondBadRequest(c, err.Error(), nil)
-			return
-		}
-		util.RespondInternalError(c)
+		util.RespondError(c, err)
 		return
 	}
 
-	util.RespondOK(c, "User registered successfully", res, nil)
+	util.RespondOK(c, "Verification code sent to your email. Please verify OTP to complete registration.", nil, nil)
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -57,15 +49,30 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	res, err := h.authUsecase.Login(c.Request.Context(), req, ipAddress, userAgent)
 	if err != nil {
-		if errors.Is(err, usecase.ErrInvalidCredentials) {
-			util.RespondUnauthorized(c, err.Error())
-			return
-		}
-		util.RespondInternalError(c)
+		util.RespondError(c, err)
 		return
 	}
 
 	util.RespondOK(c, "Login successful", res, nil)
+}
+
+func (h *AuthHandler) VerifyOTP(c *gin.Context) {
+	var req request.VerifyOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	ipAddress := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+
+	res, err := h.authUsecase.VerifyOTP(c.Request.Context(), req, ipAddress, userAgent)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "OTP verification successful", res, nil)
 }
 
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
@@ -80,11 +87,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	res, err := h.authUsecase.RefreshToken(c.Request.Context(), req, ipAddress, userAgent)
 	if err != nil {
-		if errors.Is(err, usecase.ErrInvalidToken) || errors.Is(err, usecase.ErrUserNotFound) {
-			util.RespondUnauthorized(c, "Invalid or expired session")
-			return
-		}
-		util.RespondInternalError(c)
+		util.RespondError(c, err)
 		return
 	}
 
@@ -99,7 +102,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	if err := h.authUsecase.Logout(c.Request.Context(), req); err != nil {
-		util.RespondInternalError(c)
+		util.RespondError(c, err)
 		return
 	}
 
@@ -109,19 +112,15 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Me(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)
 	if !ok {
-		util.RespondUnauthorized(c, "Unauthorized")
+		util.RespondUnauthorized(c, "Session not found")
 		return
 	}
 
 	res, err := h.authUsecase.GetProfile(c.Request.Context(), session.UserID)
 	if err != nil {
-		if errors.Is(err, usecase.ErrUserNotFound) {
-			util.RespondUnauthorized(c, "User not found")
-			return
-		}
-		util.RespondInternalError(c)
+		util.RespondError(c, err)
 		return
 	}
 
-	util.RespondOK(c, "Profile fetched successfully", res, nil)
+	util.RespondOK(c, "User profile retrieved", res, nil)
 }

@@ -10,7 +10,6 @@ import (
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	r := gin.New()
 
-	// Security: Do not blindly trust X-Forwarded-For headers from anywhere
 	_ = r.SetTrustedProxies(nil)
 
 	r.Use(middleware.CORSMiddleware())

@@ -5,7 +5,9 @@ import (
 	"concert-go/internal/handler"
 	"concert-go/internal/middleware"
 	"concert-go/internal/repository/postgres"
+	"concert-go/internal/repository/redis"
 	"concert-go/internal/usecase"
+	"concert-go/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,12 +15,17 @@ import (
 func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
 	userRepo := postgres.NewUserRepository(config.SqlDB)
 	sessionRepo := postgres.NewSessionRepository(config.SqlDB)
-	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, cfg)
-	authHandler := handler.NewAuthHandler(authUsecase)
+	otpRepo := redis.NewOTPRepository(config.RedisClient)
+	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
+
+	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, emailSender, cfg)
+	authHandler := handler.NewAuthHandler(authUsecase, cfg)
 
 	auth := router.Group("/auth")
 	auth.POST("/register", authHandler.Register)
+	auth.POST("/verify-otp", authHandler.VerifyOTP)
 	auth.POST("/login", authHandler.Login)
+
 	auth.POST("/refresh", authHandler.RefreshToken)
 	auth.POST("/logout", authHandler.Logout)
 
