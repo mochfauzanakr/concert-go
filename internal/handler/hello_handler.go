@@ -22,7 +22,7 @@ func NewHelloHandler(helloUsecase *usecase.HelloUsecase) *HelloHandler {
 func (h *HelloHandler) SayHello(c *gin.Context) {
 	msg, err := h.helloUsecase.GetGreeting()
 	if err != nil {
-		util.RespondInternalError(c)
+		util.RespondError(c, err)
 		return
 	}
 

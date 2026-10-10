@@ -1,9 +1,12 @@
 package util
 
 import (
+	"errors"
+	"log"
 	"net/http"
 
 	"concert-go/internal/domain/payload/response"
+	"concert-go/internal/exception"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -48,4 +51,18 @@ func RespondInternalError(c *gin.Context) {
 	c.JSON(http.StatusInternalServerError, response.ErrorResponse{
 		Message: "Internal server error",
 	})
+}
+
+// RespondError maps AppException to its HTTP code or falls back to 500
+func RespondError(c *gin.Context, err error) {
+	var appErr *exception.AppException
+	if errors.As(err, &appErr) {
+		c.JSON(appErr.Code, response.ErrorResponse{
+			Message: appErr.Message,
+		})
+		return
+	}
+
+	log.Printf("[Internal Error] %v", err)
+	RespondInternalError(c)
 }
