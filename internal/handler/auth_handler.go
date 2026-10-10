@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
+	"net/http"
+
 	"concert-go/internal/config"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/middleware"
@@ -8,16 +11,32 @@ import (
 	"concert-go/internal/util"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 type AuthHandler struct {
-	authUsecase *usecase.AuthUsecase
+	authUsecase       *usecase.AuthUsecase
+	googleOAuthConfig *oauth2.Config
 }
 
 // NewAuthHandler constructor
 func NewAuthHandler(authUsecase *usecase.AuthUsecase, cfg *config.Config) *AuthHandler {
+	googleConfig := &oauth2.Config{
+		ClientID:     cfg.GoogleClientID,
+		ClientSecret: cfg.GoogleClientSecret,
+		RedirectURL:  cfg.GoogleRedirectURL,
+		Scopes: []string{
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
+		},
+		Endpoint: google.Endpoint,
+	}
+
 	return &AuthHandler{
-		authUsecase: authUsecase,
+		authUsecase:       authUsecase,
+		googleOAuthConfig: googleConfig,
 	}
 }
 
@@ -73,6 +92,60 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	}
 
 	util.RespondOK(c, "OTP verification successful", res, nil)
+}
+
+func (h *AuthHandler) GoogleLogin(c *gin.Context) {
+	state := uuid.New().String()
+	url := h.googleOAuthConfig.AuthCodeURL(state)
+	c.Redirect(http.StatusTemporaryRedirect, url)
+}
+
+func (h *AuthHandler) GoogleCallback(c *gin.Context) {
+	code := c.Query("code")
+	if code == "" {
+		util.RespondBadRequest(c, "Authorization code is required", nil)
+		return
+	}
+
+	token, err := h.googleOAuthConfig.Exchange(c.Request.Context(), code)
+	if err != nil {
+		util.RespondBadRequest(c, "Failed to exchange authorization code", err.Error())
+		return
+	}
+
+	client := h.googleOAuthConfig.Client(c.Request.Context(), token)
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		util.RespondInternalError(c)
+		return
+	}
+	defer resp.Body.Close()
+
+	var googleUser struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&googleUser); err != nil {
+		util.RespondInternalError(c)
+		return
+	}
+
+	if googleUser.Email == "" {
+		util.RespondBadRequest(c, "Unable to retrieve email from Google account", nil)
+		return
+	}
+
+	ipAddress := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+
+	authRes, err := h.authUsecase.OAuthLogin(c.Request.Context(), googleUser.Email, googleUser.Name, "google", googleUser.ID, ipAddress, userAgent)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Google login successful", authRes, nil)
 }
 
 func (h *AuthHandler) RefreshToken(c *gin.Context) {

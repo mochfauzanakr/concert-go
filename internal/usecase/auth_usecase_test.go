@@ -218,6 +218,40 @@ func TestAuthUsecase_ForgotPassword_And_ResetPassword_Success(t *testing.T) {
 	}
 }
 
+func TestAuthUsecase_OAuth_Flow(t *testing.T) {
+	uc, _ := setupAuthUsecase()
+	ctx := context.Background()
+
+	email := "googleuser@example.com"
+	name := "Google User"
+	provider := "google"
+	providerID := "10987654321"
+
+	res, err := uc.OAuthLogin(ctx, email, name, provider, providerID, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("OAuthLogin failed: %v", err)
+	}
+
+	if res.User.Email != email {
+		t.Errorf("expected email %s, got %s", email, res.User.Email)
+	}
+	if res.User.RoleID == nil || *res.User.RoleID != 4 {
+		t.Errorf("expected role ID to be 4 for OAuth registration, got %v", res.User.RoleID)
+	}
+	if res.Tokens.AccessToken == "" {
+		t.Errorf("expected access token")
+	}
+
+	// Second login with same provider
+	res2, err := uc.OAuthLogin(ctx, email, name, provider, providerID, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("OAuthLogin second time failed: %v", err)
+	}
+	if res2.User.ID != res.User.ID {
+		t.Errorf("expected same user ID on repeated OAuth login")
+	}
+}
+
 func TestAuthUsecase_RefreshToken_Success(t *testing.T) {
 	uc, otpRepo := setupAuthUsecase()
 	ctx := context.Background()

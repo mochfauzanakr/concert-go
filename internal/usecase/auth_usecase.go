@@ -156,6 +156,51 @@ func (u *AuthUsecase) VerifyOTP(ctx context.Context, req request.VerifyOTPReques
 	}, nil
 }
 
+func (u *AuthUsecase) OAuthLogin(ctx context.Context, email, name, provider, providerID, ipAddress, userAgent string) (*response.AuthResponse, error) {
+	user, err := u.userRepo.FindByProvider(ctx, provider, providerID)
+	if err != nil {
+		return nil, err
+	}
+
+	if user == nil {
+		user, err = u.userRepo.FindByEmail(ctx, email)
+		if err != nil {
+			return nil, err
+		}
+
+		if user != nil {
+			user.Provider = provider
+			user.ProviderID = &providerID
+			if err := u.userRepo.Update(ctx, user); err != nil {
+				return nil, err
+			}
+		} else {
+			defaultRoleID := 4
+			user = &entity.User{
+				ID:         uuid.New(),
+				Name:       name,
+				Email:      email,
+				Provider:   provider,
+				ProviderID: &providerID,
+				RoleID:     &defaultRoleID,
+			}
+			if err := u.userRepo.Create(ctx, user); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response.AuthResponse{
+		User:   toUserResponse(user),
+		Tokens: *tokens,
+	}, nil
+}
+
 func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error) {
 	tokenHash := util.HashToken(req.RefreshToken)
 	session, err := u.sessionRepo.FindByTokenHash(ctx, tokenHash)

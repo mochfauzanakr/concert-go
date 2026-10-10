@@ -28,6 +28,9 @@ func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
 	auth.POST("/forgot-password", authHandler.ForgotPassword)
 	auth.POST("/reset-password", authHandler.ResetPassword)
 
+	auth.GET("/google/login", authHandler.GoogleLogin)
+	auth.GET("/google/callback", authHandler.GoogleCallback)
+
 	auth.POST("/refresh", authHandler.RefreshToken)
 	auth.POST("/logout", authHandler.Logout)
 

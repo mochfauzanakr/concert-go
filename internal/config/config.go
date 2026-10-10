@@ -31,6 +31,9 @@ type Config struct {
 	SMTPUsername       string
 	SMTPPassword       string
 	SMTPFrom           string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
 }
 
 // LoadConfig reads the .env file and sets up the configuration
@@ -86,6 +89,9 @@ func LoadConfig() *Config {
 		SMTPUsername:        getEnvOrDefault("SMTP_USERNAME", ""),
 		SMTPPassword:        getEnvOrDefault("SMTP_PASSWORD", ""),
 		SMTPFrom:            getEnvOrDefault("SMTP_FROM", "no-reply@concertgo.com"),
+		GoogleClientID:      getEnvOrDefault("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:  getEnvOrDefault("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:   getEnvOrDefault("GOOGLE_REDIRECT_URL", "http://localhost:8080/auth/google/callback"),
 	}
 }
 
