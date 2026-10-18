@@ -38,12 +38,33 @@ func (m *userRepositoryMock) Create(ctx context.Context, user *entity.User) erro
 	return nil
 }
 
+func (m *userRepositoryMock) Update(ctx context.Context, user *entity.User) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user.UpdatedAt = time.Now()
+	m.users[user.ID] = user
+	return nil
+}
+
 func (m *userRepositoryMock) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	for _, u := range m.users {
 		if u.Email == email && !u.DeletedAt.Valid {
+			return u, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *userRepositoryMock) FindByProvider(ctx context.Context, provider, providerID string) (*entity.User, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, u := range m.users {
+		if u.Provider == provider && u.ProviderID != nil && *u.ProviderID == providerID && !u.DeletedAt.Valid {
 			return u, nil
 		}
 	}

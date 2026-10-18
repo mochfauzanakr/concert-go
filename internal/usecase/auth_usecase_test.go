@@ -2,27 +2,50 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	"concert-go/internal/config"
+	"concert-go/internal/domain/entity"
 	"concert-go/internal/domain/payload/request"
+	"concert-go/internal/exception"
+	"concert-go/internal/repository"
 	"concert-go/internal/repository/mock"
 	"concert-go/internal/usecase"
 )
 
-func setupAuthUsecase() usecase.AuthUsecase {
+type mockEmailSender struct{}
+
+func (m *mockEmailSender) SendEmail(to []string, subject string, body string, isHTML bool) error {
+	return nil
+}
+
+func (m *mockEmailSender) SendRegistrationOTP(to, name, otp string) error {
+	return nil
+}
+
+func (m *mockEmailSender) SendPasswordResetOTP(to, otp string) error {
+	return nil
+}
+
+func setupAuthUsecase() (*usecase.AuthUsecase, repository.OTPRepository) {
 	userRepo := mock.NewUserRepositoryMock()
 	sessionRepo := mock.NewSessionRepositoryMock()
+	otpRepo := mock.NewOTPRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	emailSender := &mockEmailSender{}
 	cfg := &config.Config{
 		JWTSecret:           "test-secret-key-123",
 		JWTAccessExpMinutes: 15,
 		JWTRefreshExpDays:   7,
 	}
-	return usecase.NewAuthUsecase(userRepo, sessionRepo, cfg)
+	return usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg), otpRepo
 }
 
-func TestAuthUsecase_Register_Success(t *testing.T) {
-	uc := setupAuthUsecase()
+func TestAuthUsecase_Register_And_VerifyOTP_Success(t *testing.T) {
+	uc, otpRepo := setupAuthUsecase()
 	ctx := context.Background()
 
 	req := request.RegisterRequest{
@@ -31,21 +54,61 @@ func TestAuthUsecase_Register_Success(t *testing.T) {
 		Password: "Password123!",
 	}
 
-	res, err := uc.Register(ctx, req, "127.0.0.1", "test-agent")
+	err := uc.Register(ctx, req)
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Fatalf("expected no error on register, got %v", err)
+	}
+
+	pending, err := otpRepo.GetPendingRegistration(ctx, req.Email)
+	if err != nil || pending == nil {
+		t.Fatalf("expected pending registration in Redis, got %v", err)
+	}
+
+	// Verify with invalid OTP
+	_, err = uc.VerifyOTP(ctx, request.VerifyOTPRequest{
+		Email: req.Email,
+		OTP:   "000000",
+	}, "127.0.0.1", "test-agent")
+
+	var appErr *exception.AppException
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for bad OTP, got %v", err)
+	}
+
+	// Verify with correct OTP
+	res, err := uc.VerifyOTP(ctx, request.VerifyOTPRequest{
+		Email: req.Email,
+		OTP:   pending.OTP,
+	}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("expected verify success, got %v", err)
 	}
 
 	if res.User.Email != req.Email {
 		t.Errorf("expected email %s, got %s", req.Email, res.User.Email)
 	}
+	if res.User.RoleID == nil || *res.User.RoleID != 4 {
+		t.Errorf("expected role ID to be 4 on registration, got %v", res.User.RoleID)
+	}
 	if res.Tokens.AccessToken == "" || res.Tokens.RefreshToken == "" {
 		t.Errorf("expected access and refresh tokens to be generated")
+	}
+
+	// Now login with password
+	loginRes, err := uc.Login(ctx, request.LoginRequest{
+		Email:    req.Email,
+		Password: req.Password,
+	}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("expected login success, got %v", err)
+	}
+	if loginRes.User.Email != req.Email {
+		t.Errorf("expected login email %s, got %s", req.Email, loginRes.User.Email)
 	}
 }
 
 func TestAuthUsecase_Register_DuplicateEmail(t *testing.T) {
-	uc := setupAuthUsecase()
+	uc, otpRepo := setupAuthUsecase()
 	ctx := context.Background()
 
 	req := request.RegisterRequest{
@@ -54,43 +117,19 @@ func TestAuthUsecase_Register_DuplicateEmail(t *testing.T) {
 		Password: "Password123!",
 	}
 
-	_, _ = uc.Register(ctx, req, "127.0.0.1", "test-agent")
-	_, err := uc.Register(ctx, req, "127.0.0.1", "test-agent")
-	if err != usecase.ErrEmailAlreadyExists {
-		t.Fatalf("expected ErrEmailAlreadyExists, got %v", err)
-	}
-}
+	_ = uc.Register(ctx, req)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, req.Email)
+	_, _ = uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: req.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
 
-func TestAuthUsecase_Login_Success(t *testing.T) {
-	uc := setupAuthUsecase()
-	ctx := context.Background()
-
-	regReq := request.RegisterRequest{
-		Name:     "Jane Doe",
-		Email:    "jane@example.com",
-		Password: "SecretPass123!",
-	}
-	_, err := uc.Register(ctx, regReq, "127.0.0.1", "test-agent")
-	if err != nil {
-		t.Fatalf("setup registration failed: %v", err)
-	}
-
-	loginReq := request.LoginRequest{
-		Email:    "jane@example.com",
-		Password: "SecretPass123!",
-	}
-	res, err := uc.Login(ctx, loginReq, "127.0.0.1", "test-agent")
-	if err != nil {
-		t.Fatalf("expected login success, got %v", err)
-	}
-
-	if res.User.Email != loginReq.Email {
-		t.Errorf("expected email %s, got %s", loginReq.Email, res.User.Email)
+	err := uc.Register(ctx, req)
+	var appErr *exception.AppException
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict for duplicate email, got %v", err)
 	}
 }
 
 func TestAuthUsecase_Login_InvalidPassword(t *testing.T) {
-	uc := setupAuthUsecase()
+	uc, otpRepo := setupAuthUsecase()
 	ctx := context.Background()
 
 	regReq := request.RegisterRequest{
@@ -98,20 +137,125 @@ func TestAuthUsecase_Login_InvalidPassword(t *testing.T) {
 		Email:    "jane@example.com",
 		Password: "SecretPass123!",
 	}
-	_, _ = uc.Register(ctx, regReq, "127.0.0.1", "test-agent")
+	_ = uc.Register(ctx, regReq)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, regReq.Email)
+	_, _ = uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: regReq.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
 
 	loginReq := request.LoginRequest{
 		Email:    "jane@example.com",
 		Password: "wrongPassword",
 	}
 	_, err := uc.Login(ctx, loginReq, "127.0.0.1", "test-agent")
-	if err != usecase.ErrInvalidCredentials {
-		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	var appErr *exception.AppException
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for invalid password, got %v", err)
+	}
+}
+
+func TestAuthUsecase_ForgotPassword_And_ResetPassword_Success(t *testing.T) {
+	uc, otpRepo := setupAuthUsecase()
+	ctx := context.Background()
+
+	// 1. Register and verify user first
+	regReq := request.RegisterRequest{
+		Name:     "Bob",
+		Email:    "bob@example.com",
+		Password: "OldPassword123!",
+	}
+	_ = uc.Register(ctx, regReq)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, regReq.Email)
+	_, _ = uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: regReq.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
+
+	// 2. Forgot password request
+	err := uc.ForgotPassword(ctx, request.ForgotPasswordRequest{Email: "bob@example.com"})
+	if err != nil {
+		t.Fatalf("expected forgot password success, got %v", err)
+	}
+
+	otp, err := otpRepo.GetResetOTP(ctx, "bob@example.com")
+	if err != nil || otp == "" {
+		t.Fatalf("expected reset OTP stored, got %v", err)
+	}
+
+	// 3. Reset password with bad OTP
+	err = uc.ResetPassword(ctx, request.ResetPasswordRequest{
+		Email:       "bob@example.com",
+		OTP:         "000000",
+		NewPassword: "NewPassword123!",
+	})
+	var appErr *exception.AppException
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for bad reset OTP, got %v", err)
+	}
+
+	// 4. Reset password with correct OTP
+	err = uc.ResetPassword(ctx, request.ResetPasswordRequest{
+		Email:       "bob@example.com",
+		OTP:         otp,
+		NewPassword: "NewPassword123!",
+	})
+	if err != nil {
+		t.Fatalf("expected reset password success, got %v", err)
+	}
+
+	// 5. Try login with old password (should fail)
+	_, err = uc.Login(ctx, request.LoginRequest{
+		Email:    "bob@example.com",
+		Password: "OldPassword123!",
+	}, "127.0.0.1", "test-agent")
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for old password, got %v", err)
+	}
+
+	// 6. Try login with new password (should succeed)
+	loginRes, err := uc.Login(ctx, request.LoginRequest{
+		Email:    "bob@example.com",
+		Password: "NewPassword123!",
+	}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("expected login with new password success, got %v", err)
+	}
+	if loginRes.User.Email != "bob@example.com" {
+		t.Errorf("expected email bob@example.com, got %s", loginRes.User.Email)
+	}
+}
+
+func TestAuthUsecase_OAuth_Flow(t *testing.T) {
+	uc, _ := setupAuthUsecase()
+	ctx := context.Background()
+
+	email := "googleuser@example.com"
+	name := "Google User"
+	provider := "google"
+	providerID := "10987654321"
+
+	res, err := uc.OAuthLogin(ctx, email, name, provider, providerID, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("OAuthLogin failed: %v", err)
+	}
+
+	if res.User.Email != email {
+		t.Errorf("expected email %s, got %s", email, res.User.Email)
+	}
+	if res.User.RoleID == nil || *res.User.RoleID != 4 {
+		t.Errorf("expected role ID to be 4 for OAuth registration, got %v", res.User.RoleID)
+	}
+	if res.Tokens.AccessToken == "" {
+		t.Errorf("expected access token")
+	}
+
+	// Second login with same provider
+	res2, err := uc.OAuthLogin(ctx, email, name, provider, providerID, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("OAuthLogin second time failed: %v", err)
+	}
+	if res2.User.ID != res.User.ID {
+		t.Errorf("expected same user ID on repeated OAuth login")
 	}
 }
 
 func TestAuthUsecase_RefreshToken_Success(t *testing.T) {
-	uc := setupAuthUsecase()
+	uc, otpRepo := setupAuthUsecase()
 	ctx := context.Background()
 
 	regReq := request.RegisterRequest{
@@ -119,15 +263,18 @@ func TestAuthUsecase_RefreshToken_Success(t *testing.T) {
 		Email:    "alice@example.com",
 		Password: "Password123!",
 	}
-	authRes, err := uc.Register(ctx, regReq, "127.0.0.1", "test-agent")
+	_ = uc.Register(ctx, regReq)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, regReq.Email)
+	authRes, err := uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: regReq.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
 	if err != nil {
-		t.Fatalf("register failed: %v", err)
+		t.Fatalf("register and verify failed: %v", err)
 	}
 
 	refreshReq := request.RefreshTokenRequest{
 		RefreshToken: authRes.Tokens.RefreshToken,
 	}
 
+	time.Sleep(10 * time.Millisecond)
 	tokens, err := uc.RefreshToken(ctx, refreshReq, "127.0.0.1", "test-agent")
 	if err != nil {
 		t.Fatalf("expected refresh token success, got %v", err)
@@ -136,4 +283,147 @@ func TestAuthUsecase_RefreshToken_Success(t *testing.T) {
 	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
 		t.Errorf("expected new access and refresh token pair")
 	}
+}
+
+func TestAuthUsecase_ChangePassword(t *testing.T) {
+	uc, otpRepo := setupAuthUsecase()
+	ctx := context.Background()
+
+	regReq := request.RegisterRequest{
+		Name:     "Bob",
+		Email:    "bob@example.com",
+		Password: "Password123!",
+	}
+	_ = uc.Register(ctx, regReq)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, regReq.Email)
+	authRes, err := uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: regReq.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("setup user failed: %v", err)
+	}
+	userID := authRes.User.ID
+
+	t.Run("mismatched confirm password", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "NewPassword123!",
+			ConfirmNewPassword: "DifferentPassword123!",
+		})
+		if err == nil {
+			t.Fatal("expected error for mismatched confirm password")
+		}
+	})
+
+	t.Run("weak new password", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "weak",
+			ConfirmNewPassword: "weak",
+		})
+		if err == nil {
+			t.Fatal("expected error for weak new password")
+		}
+	})
+
+	t.Run("incorrect current password", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "WrongPass123!",
+			NewPassword:        "NewPassword123!",
+			ConfirmNewPassword: "NewPassword123!",
+		})
+		if err == nil {
+			t.Fatal("expected error for wrong current password")
+		}
+	})
+
+	t.Run("same new password as current", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "Password123!",
+			ConfirmNewPassword: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error when new password equals current password")
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "NewPassword123!",
+			ConfirmNewPassword: "NewPassword123!",
+		})
+		if err != nil {
+			t.Fatalf("expected successful password change, got: %v", err)
+		}
+
+		// Verify login with new password works
+		loginRes, err := uc.Login(ctx, request.LoginRequest{
+			Email:    "bob@example.com",
+			Password: "NewPassword123!",
+		}, "127.0.0.1", "test-agent")
+		if err != nil || loginRes == nil {
+			t.Fatalf("expected login with new password to succeed, got: %v", err)
+		}
+	})
+}
+
+type mockFailingEmailSender struct{}
+
+func (m *mockFailingEmailSender) SendEmail(to []string, subject string, body string, isHTML bool) error {
+	return errors.New("smtp connection refused")
+}
+
+func (m *mockFailingEmailSender) SendRegistrationOTP(to, name, otp string) error {
+	return errors.New("smtp connection refused")
+}
+
+func (m *mockFailingEmailSender) SendPasswordResetOTP(to, otp string) error {
+	return errors.New("smtp connection refused")
+}
+
+func TestAuthUsecase_EmailSendFailure(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	sessionRepo := mock.NewSessionRepositoryMock()
+	otpRepo := mock.NewOTPRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	failingEmail := &mockFailingEmailSender{}
+	cfg := &config.Config{JWTSecret: "test-secret"}
+	uc := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, failingEmail, cfg)
+
+	t.Run("register email failure deletes pending registration", func(t *testing.T) {
+		err := uc.Register(ctx, request.RegisterRequest{
+			Name:     "Fail User",
+			Email:    "failuser@example.com",
+			Password: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error on email failure")
+		}
+
+		pending, _ := otpRepo.GetPendingRegistration(ctx, "failuser@example.com")
+		if pending != nil {
+			t.Fatal("expected pending registration to be cleaned up from Redis on email failure")
+		}
+	})
+
+	t.Run("forgot password email failure deletes reset otp", func(t *testing.T) {
+		// First create a user
+		_ = userRepo.Create(ctx, &entity.User{
+			Email: "existing@example.com",
+			Name:  "Existing",
+		})
+
+		err := uc.ForgotPassword(ctx, request.ForgotPasswordRequest{
+			Email: "existing@example.com",
+		})
+		if err == nil {
+			t.Fatal("expected error on forgot password email failure")
+		}
+
+		otp, _ := otpRepo.GetResetOTP(ctx, "existing@example.com")
+		if otp != "" {
+			t.Fatal("expected reset OTP to be cleaned up from Redis on email failure")
+		}
+	})
 }

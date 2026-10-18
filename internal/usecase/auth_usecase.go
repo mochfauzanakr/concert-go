@@ -2,82 +2,153 @@ package usecase
 
 import (
 	"context"
-	"errors"
+	"crypto/rand"
+	"fmt"
 	"time"
 
 	"concert-go/internal/config"
 	"concert-go/internal/domain/entity"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/domain/payload/response"
+	"concert-go/internal/exception"
 	"concert-go/internal/repository"
 	"concert-go/internal/util"
 
 	"github.com/google/uuid"
 )
 
-var (
-	ErrEmailAlreadyExists = errors.New("email already registered")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrInvalidToken       = errors.New("invalid or expired token")
-	ErrUserNotFound       = errors.New("user not found")
-)
-
-// AuthUsecase contract
-type AuthUsecase interface {
-	Register(ctx context.Context, req request.RegisterRequest, ipAddress, userAgent string) (*response.AuthResponse, error)
-	Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error)
-	RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error)
-	Logout(ctx context.Context, req request.LogoutRequest) error
-	GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error)
-}
-
-type authUsecaseImpl struct {
+type AuthUsecase struct {
 	userRepo    repository.UserRepository
 	sessionRepo repository.SessionRepository
+	otpRepo     repository.OTPRepository
+	roleRepo    repository.RoleRepository
+	emailSender util.EmailSender
 	cfg         *config.Config
 }
 
 // NewAuthUsecase constructor
-func NewAuthUsecase(userRepo repository.UserRepository, sessionRepo repository.SessionRepository, cfg *config.Config) AuthUsecase {
-	return &authUsecaseImpl{
+func NewAuthUsecase(
+	userRepo repository.UserRepository,
+	sessionRepo repository.SessionRepository,
+	otpRepo repository.OTPRepository,
+	roleRepo repository.RoleRepository,
+	emailSender util.EmailSender,
+	cfg *config.Config,
+) *AuthUsecase {
+	return &AuthUsecase{
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
+		otpRepo:     otpRepo,
+		roleRepo:    roleRepo,
+		emailSender: emailSender,
 		cfg:         cfg,
 	}
 }
 
-func (u *authUsecaseImpl) Register(ctx context.Context, req request.RegisterRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+func (u *AuthUsecase) Register(ctx context.Context, req request.RegisterRequest) error {
 	if err := util.ValidateEmailTLD(req.Email); err != nil {
-		return nil, err
+		return err
 	}
 	if err := util.ValidatePassword(req.Password); err != nil {
-		return nil, err
+		return err
 	}
 
 	existing, err := u.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if existing != nil {
-		return nil, ErrEmailAlreadyExists
+		return exception.Conflict("email already registered")
 	}
 
 	hashedPassword, err := util.HashPassword(req.Password)
 	if err != nil {
+		return err
+	}
+
+	otp, err := generateOTP()
+	if err != nil {
+		return err
+	}
+
+	pending := &repository.PendingRegistration{
+		Name:         req.Name,
+		Email:        req.Email,
+		PasswordHash: hashedPassword,
+		OTP:          otp,
+	}
+
+	if err := u.otpRepo.SetPendingRegistration(ctx, pending, 5*time.Minute); err != nil {
+		return err
+	}
+
+	if u.emailSender != nil {
+		if err := u.emailSender.SendRegistrationOTP(req.Email, req.Name, otp); err != nil {
+			_ = u.otpRepo.DeletePendingRegistration(ctx, req.Email)
+			return exception.Internal("failed to send registration OTP email", err)
+		}
+	}
+
+	return nil
+}
+
+func (u *AuthUsecase) Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
 		return nil, err
+	}
+	if user == nil {
+		return nil, exception.Unauthorized("invalid email or password")
+	}
+
+	if user.PasswordHash == nil || !util.CheckPassword(req.Password, *user.PasswordHash) {
+		return nil, exception.Unauthorized("invalid email or password")
+	}
+
+	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response.AuthResponse{
+		User:   toUserResponse(user),
+		Tokens: *tokens,
+	}, nil
+}
+
+func (u *AuthUsecase) VerifyOTP(ctx context.Context, req request.VerifyOTPRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return nil, err
+	}
+
+	pending, err := u.otpRepo.GetPendingRegistration(ctx, req.Email)
+	if err != nil || pending == nil || pending.OTP != req.OTP {
+		return nil, exception.Unauthorized("invalid or expired OTP code")
+	}
+
+	var roleID *int
+	if u.roleRepo != nil {
+		buyerRole, err := u.roleRepo.FindByName(ctx, "USER")
+		if err == nil && buyerRole != nil {
+			roleID = &buyerRole.ID
+		}
 	}
 
 	user := &entity.User{
 		ID:           uuid.New(),
-		Name:         req.Name,
-		Email:        req.Email,
-		PasswordHash: hashedPassword,
+		Name:         pending.Name,
+		Email:        pending.Email,
+		PasswordHash: &pending.PasswordHash,
+		Provider:     "email",
+		RoleID:       roleID,
 	}
 
 	if err := u.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
 
+	_ = u.otpRepo.DeletePendingRegistration(ctx, req.Email)
+
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
 	if err != nil {
 		return nil, err
@@ -89,17 +160,45 @@ func (u *authUsecaseImpl) Register(ctx context.Context, req request.RegisterRequ
 	}, nil
 }
 
-func (u *authUsecaseImpl) Login(ctx context.Context, req request.LoginRequest, ipAddress, userAgent string) (*response.AuthResponse, error) {
-	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+func (u *AuthUsecase) OAuthLogin(ctx context.Context, email, name, provider, providerID, ipAddress, userAgent string) (*response.AuthResponse, error) {
+	user, err := u.userRepo.FindByProvider(ctx, provider, providerID)
 	if err != nil {
 		return nil, err
 	}
+
 	if user == nil {
-		return nil, ErrInvalidCredentials
-	}
+		user, err = u.userRepo.FindByEmail(ctx, email)
+		if err != nil {
+			return nil, err
+		}
 
-	if !util.CheckPassword(req.Password, user.PasswordHash) {
-		return nil, ErrInvalidCredentials
+		if user != nil {
+			user.Provider = provider
+			user.ProviderID = &providerID
+			if err := u.userRepo.Update(ctx, user); err != nil {
+				return nil, err
+			}
+		} else {
+			var roleID *int
+			if u.roleRepo != nil {
+				buyerRole, err := u.roleRepo.FindByName(ctx, "USER")
+				if err == nil && buyerRole != nil {
+					roleID = &buyerRole.ID
+				}
+			}
+
+			user = &entity.User{
+				ID:         uuid.New(),
+				Name:       name,
+				Email:      email,
+				Provider:   provider,
+				ProviderID: &providerID,
+				RoleID:     roleID,
+			}
+			if err := u.userRepo.Create(ctx, user); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
@@ -113,14 +212,14 @@ func (u *authUsecaseImpl) Login(ctx context.Context, req request.LoginRequest, i
 	}, nil
 }
 
-func (u *authUsecaseImpl) RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error) {
+func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshTokenRequest, ipAddress, userAgent string) (*response.TokenResponse, error) {
 	tokenHash := util.HashToken(req.RefreshToken)
 	session, err := u.sessionRepo.FindByTokenHash(ctx, tokenHash)
 	if err != nil {
 		return nil, err
 	}
 	if session == nil || session.RevokedAt != nil || time.Now().After(session.ExpiresAt) {
-		return nil, ErrInvalidToken
+		return nil, exception.Unauthorized("invalid or expired token")
 	}
 
 	user, err := u.userRepo.FindByID(ctx, session.UserID)
@@ -128,7 +227,7 @@ func (u *authUsecaseImpl) RefreshToken(ctx context.Context, req request.RefreshT
 		return nil, err
 	}
 	if user == nil {
-		return nil, ErrUserNotFound
+		return nil, exception.NotFound("user not found")
 	}
 
 	// Revoke old session token
@@ -138,24 +237,130 @@ func (u *authUsecaseImpl) RefreshToken(ctx context.Context, req request.RefreshT
 	return u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
 }
 
-func (u *authUsecaseImpl) Logout(ctx context.Context, req request.LogoutRequest) error {
+func (u *AuthUsecase) Logout(ctx context.Context, req request.LogoutRequest) error {
 	tokenHash := util.HashToken(req.RefreshToken)
 	return u.sessionRepo.Revoke(ctx, tokenHash)
 }
 
-func (u *authUsecaseImpl) GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error) {
+func (u *AuthUsecase) ForgotPassword(ctx context.Context, req request.ForgotPasswordRequest) error {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return err
+	}
+
+	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return exception.NotFound("user not found")
+	}
+
+	otp, err := generateOTP()
+	if err != nil {
+		return err
+	}
+
+	if err := u.otpRepo.SetResetOTP(ctx, req.Email, otp, 5*time.Minute); err != nil {
+		return err
+	}
+
+	if u.emailSender != nil {
+		if err := u.emailSender.SendPasswordResetOTP(req.Email, otp); err != nil {
+			_ = u.otpRepo.DeleteResetOTP(ctx, req.Email)
+			return exception.Internal("failed to send password reset email", err)
+		}
+	}
+
+	return nil
+}
+
+func (u *AuthUsecase) ResetPassword(ctx context.Context, req request.ResetPasswordRequest) error {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return err
+	}
+	if err := util.ValidatePassword(req.NewPassword); err != nil {
+		return err
+	}
+
+	storedOTP, err := u.otpRepo.GetResetOTP(ctx, req.Email)
+	if err != nil || storedOTP == "" || storedOTP != req.OTP {
+		return exception.Unauthorized("invalid or expired OTP code")
+	}
+
+	user, err := u.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return exception.NotFound("user not found")
+	}
+
+	hashedPassword, err := util.HashPassword(req.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	user.PasswordHash = &hashedPassword
+	if err := u.userRepo.Update(ctx, user); err != nil {
+		return err
+	}
+
+	_ = u.otpRepo.DeleteResetOTP(ctx, req.Email)
+
+	return nil
+}
+
+func (u *AuthUsecase) ChangePassword(ctx context.Context, userID uuid.UUID, req request.ChangePasswordRequest) error {
+	if req.NewPassword != req.ConfirmNewPassword {
+		return exception.BadRequest("new password and confirm password do not match")
+	}
+
+	if err := util.ValidatePassword(req.NewPassword); err != nil {
+		return exception.BadRequest(err.Error())
+	}
+
+	user, err := u.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return exception.NotFound("user not found")
+	}
+
+	if user.PasswordHash == nil || *user.PasswordHash == "" {
+		return exception.BadRequest("password cannot be changed for accounts without a password")
+	}
+
+	if !util.CheckPassword(req.CurrentPassword, *user.PasswordHash) {
+		return exception.BadRequest("incorrect current password")
+	}
+
+	if req.CurrentPassword == req.NewPassword || util.CheckPassword(req.NewPassword, *user.PasswordHash) {
+		return exception.BadRequest("new password cannot be the same as current password")
+	}
+
+	hashedPassword, err := util.HashPassword(req.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	user.PasswordHash = &hashedPassword
+	return u.userRepo.Update(ctx, user)
+}
+
+func (u *AuthUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error) {
 	user, err := u.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	if user == nil {
-		return nil, ErrUserNotFound
+		return nil, exception.NotFound("user not found")
 	}
 	res := toUserResponse(user)
 	return &res, nil
 }
 
-func (u *authUsecaseImpl) generateAndSaveTokens(ctx context.Context, user *entity.User, ipAddress, userAgent string) (*response.TokenResponse, error) {
+func (u *AuthUsecase) generateAndSaveTokens(ctx context.Context, user *entity.User, ipAddress, userAgent string) (*response.TokenResponse, error) {
 	now := time.Now()
 	accessExpDuration := time.Duration(u.cfg.JWTAccessExpMinutes) * time.Minute
 	accessExpiresAt := now.Add(accessExpDuration).Unix()
@@ -196,6 +401,15 @@ func (u *authUsecaseImpl) generateAndSaveTokens(ctx context.Context, user *entit
 		TokenType:    "Bearer",
 		ExpiresIn:    int(accessExpDuration.Seconds()),
 	}, nil
+}
+
+func generateOTP() (string, error) {
+	var b [3]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	num := (int(b[0])<<16 | int(b[1])<<8 | int(b[2])) % 1000000
+	return fmt.Sprintf("%06d", num), nil
 }
 
 func toUserResponse(user *entity.User) response.UserResponse {

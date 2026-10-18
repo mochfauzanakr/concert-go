@@ -8,6 +8,8 @@ import (
 // EmailSender defines email dispatch capability
 type EmailSender interface {
 	SendEmail(to []string, subject string, body string, isHTML bool) error
+	SendRegistrationOTP(to, name, otp string) error
+	SendPasswordResetOTP(to, otp string) error
 }
 
 type smtpEmailSender struct {
@@ -35,7 +37,7 @@ func (s *smtpEmailSender) SendEmail(to []string, subject string, body string, is
 		contentType = "text/html; charset=UTF-8"
 	}
 
-	headers := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s\r\n\r\n",
+	headers := fmt.Sprintf("From: ConcertGo <%s>\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s\r\n\r\n",
 		s.from, to[0], subject, contentType)
 
 	msg := []byte(headers + body)
@@ -47,4 +49,16 @@ func (s *smtpEmailSender) SendEmail(to []string, subject string, body string, is
 	}
 
 	return smtp.SendMail(addr, auth, s.from, to, msg)
+}
+
+func (s *smtpEmailSender) SendRegistrationOTP(to, name, otp string) error {
+	subject := "Your ConcertGo Registration Code"
+	body := fmt.Sprintf("Hello %s,\n\nYour verification code is: %s\n\nThis code will expire in 5 minutes.", name, otp)
+	return s.SendEmail([]string{to}, subject, body, false)
+}
+
+func (s *smtpEmailSender) SendPasswordResetOTP(to, otp string) error {
+	subject := "Your ConcertGo Password Reset Code"
+	body := fmt.Sprintf("Hello,\n\nYour password reset code is: %s\n\nThis code will expire in 5 minutes.\n\nIf you did not request a password reset, you can safely ignore this email.", otp)
+	return s.SendEmail([]string{to}, subject, body, false)
 }

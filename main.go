@@ -27,6 +27,23 @@ func main() {
 		if err != nil {
 			log.Fatalf("Migration failed: %v", err)
 		}
+		// Seed default roles if they don't exist
+		var roleCount int64
+		config.GormDB.Model(&entity.Role{}).Count(&roleCount)
+		if roleCount == 0 {
+			defaultRoles := []entity.Role{
+				{ID: 1, Name: "SUPER_ADMIN"},
+				{ID: 2, Name: "ADMIN"},
+				{ID: 3, Name: "ORGANIZER"},
+				{ID: 4, Name: "USER"},
+				{ID: 5, Name: "STAFF"},
+			}
+			if err := config.GormDB.Create(&defaultRoles).Error; err != nil {
+				log.Printf("Role seed warning: %v", err)
+			} else {
+				log.Println("Default roles seeded successfully")
+			}
+		}
 	}
 
 	// Setup Gin Router

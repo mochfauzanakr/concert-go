@@ -10,16 +10,16 @@ import (
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	r := gin.New()
 
-	// Security: Do not blindly trust X-Forwarded-For headers from anywhere
 	_ = r.SetTrustedProxies(nil)
 
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.RecoveryMiddleware())
 
-	api := r.Group("/api/v1")
+	api := r.Group("/api")
 	{
 		HelloRoute(api)
 		AuthRoute(api, cfg)
+		RoleRoute(api)
 
 		// TODO: delete it in when it goes to main
 		DevRoute(api, cfg)
