@@ -282,3 +282,85 @@ func TestAuthUsecase_RefreshToken_Success(t *testing.T) {
 		t.Errorf("expected new access and refresh token pair")
 	}
 }
+
+func TestAuthUsecase_ChangePassword(t *testing.T) {
+	uc, otpRepo := setupAuthUsecase()
+	ctx := context.Background()
+
+	regReq := request.RegisterRequest{
+		Name:     "Bob",
+		Email:    "bob@example.com",
+		Password: "Password123!",
+	}
+	_ = uc.Register(ctx, regReq)
+	pending, _ := otpRepo.GetPendingRegistration(ctx, regReq.Email)
+	authRes, err := uc.VerifyOTP(ctx, request.VerifyOTPRequest{Email: regReq.Email, OTP: pending.OTP}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("setup user failed: %v", err)
+	}
+	userID := authRes.User.ID
+
+	t.Run("mismatched confirm password", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "NewPassword123!",
+			ConfirmNewPassword: "DifferentPassword123!",
+		})
+		if err == nil {
+			t.Fatal("expected error for mismatched confirm password")
+		}
+	})
+
+	t.Run("weak new password", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "weak",
+			ConfirmNewPassword: "weak",
+		})
+		if err == nil {
+			t.Fatal("expected error for weak new password")
+		}
+	})
+
+	t.Run("incorrect current password", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "WrongPass123!",
+			NewPassword:        "NewPassword123!",
+			ConfirmNewPassword: "NewPassword123!",
+		})
+		if err == nil {
+			t.Fatal("expected error for wrong current password")
+		}
+	})
+
+	t.Run("same new password as current", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "Password123!",
+			ConfirmNewPassword: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error when new password equals current password")
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		err := uc.ChangePassword(ctx, userID, request.ChangePasswordRequest{
+			CurrentPassword:    "Password123!",
+			NewPassword:        "NewPassword123!",
+			ConfirmNewPassword: "NewPassword123!",
+		})
+		if err != nil {
+			t.Fatalf("expected successful password change, got: %v", err)
+		}
+
+		// Verify login with new password works
+		loginRes, err := uc.Login(ctx, request.LoginRequest{
+			Email:    "bob@example.com",
+			Password: "NewPassword123!",
+		}, "127.0.0.1", "test-agent")
+		if err != nil || loginRes == nil {
+			t.Fatalf("expected login with new password to succeed, got: %v", err)
+		}
+	})
+}

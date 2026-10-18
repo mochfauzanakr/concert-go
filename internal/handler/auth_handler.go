@@ -212,6 +212,27 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	util.RespondOK(c, "Password has been reset successfully", nil, nil)
 }
 
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	var req request.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	if err := h.authUsecase.ChangePassword(c.Request.Context(), session.UserID, req); err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Password changed successfully", nil, nil)
+}
+
 func (h *AuthHandler) Me(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)
 	if !ok {

@@ -33,3 +33,9 @@ type ResetPasswordRequest struct {
 	OTP         string `json:"otp" binding:"required,len=6"`
 	NewPassword string `json:"newPassword" binding:"required,min=8,max=128"`
 }
+
+type ChangePasswordRequest struct {
+	CurrentPassword    string `json:"currentPassword" binding:"required"`
+	NewPassword        string `json:"newPassword" binding:"required,min=8,max=128"`
+	ConfirmNewPassword string `json:"confirmNewPassword" binding:"required,min=8,max=128"`
+}

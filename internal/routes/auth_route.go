@@ -37,4 +37,5 @@ func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
 	protected := auth.Group("")
 	protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	protected.GET("/me", authHandler.Me)
+	protected.POST("/change-password", authHandler.ChangePassword)
 }

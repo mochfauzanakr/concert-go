@@ -296,6 +296,44 @@ func (u *AuthUsecase) ResetPassword(ctx context.Context, req request.ResetPasswo
 	return nil
 }
 
+func (u *AuthUsecase) ChangePassword(ctx context.Context, userID uuid.UUID, req request.ChangePasswordRequest) error {
+	if req.NewPassword != req.ConfirmNewPassword {
+		return exception.BadRequest("new password and confirm password do not match")
+	}
+
+	if err := util.ValidatePassword(req.NewPassword); err != nil {
+		return exception.BadRequest(err.Error())
+	}
+
+	user, err := u.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return exception.NotFound("user not found")
+	}
+
+	if user.PasswordHash == nil || *user.PasswordHash == "" {
+		return exception.BadRequest("password cannot be changed for accounts without a password")
+	}
+
+	if !util.CheckPassword(req.CurrentPassword, *user.PasswordHash) {
+		return exception.BadRequest("incorrect current password")
+	}
+
+	if req.CurrentPassword == req.NewPassword || util.CheckPassword(req.NewPassword, *user.PasswordHash) {
+		return exception.BadRequest("new password cannot be the same as current password")
+	}
+
+	hashedPassword, err := util.HashPassword(req.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	user.PasswordHash = &hashedPassword
+	return u.userRepo.Update(ctx, user)
+}
+
 func (u *AuthUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*response.UserResponse, error) {
 	user, err := u.userRepo.FindByID(ctx, userID)
 	if err != nil {
