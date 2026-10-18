@@ -16,9 +16,10 @@ func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
 	userRepo := postgres.NewUserRepository(config.SqlDB)
 	sessionRepo := postgres.NewSessionRepository(config.SqlDB)
 	otpRepo := redis.NewOTPRepository(config.RedisClient)
+	roleRepo := postgres.NewRoleRepository(config.SqlDB)
 	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
 
-	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, emailSender, cfg)
+	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
 	authHandler := handler.NewAuthHandler(authUsecase, cfg)
 
 	auth := router.Group("/auth")

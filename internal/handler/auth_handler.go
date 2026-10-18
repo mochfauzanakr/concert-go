@@ -96,11 +96,21 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 
 func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 	state := uuid.New().String()
+	c.SetCookie("oauth_state", state, 300, "/", "", false, true)
 	url := h.googleOAuthConfig.AuthCodeURL(state)
 	c.Redirect(http.StatusTemporaryRedirect, url)
 }
 
 func (h *AuthHandler) GoogleCallback(c *gin.Context) {
+	state := c.Query("state")
+	savedState, err := c.Cookie("oauth_state")
+	c.SetCookie("oauth_state", "", -1, "/", "", false, true)
+
+	if state == "" || err != nil || state != savedState {
+		util.RespondBadRequest(c, "Invalid or expired OAuth state", nil)
+		return
+	}
+
 	code := c.Query("code")
 	if code == "" {
 		util.RespondBadRequest(c, "Authorization code is required", nil)

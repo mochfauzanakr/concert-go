@@ -21,6 +21,7 @@ type AuthUsecase struct {
 	userRepo    repository.UserRepository
 	sessionRepo repository.SessionRepository
 	otpRepo     repository.OTPRepository
+	roleRepo    repository.RoleRepository
 	emailSender util.EmailSender
 	cfg         *config.Config
 }
@@ -30,6 +31,7 @@ func NewAuthUsecase(
 	userRepo repository.UserRepository,
 	sessionRepo repository.SessionRepository,
 	otpRepo repository.OTPRepository,
+	roleRepo repository.RoleRepository,
 	emailSender util.EmailSender,
 	cfg *config.Config,
 ) *AuthUsecase {
@@ -37,6 +39,7 @@ func NewAuthUsecase(
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
 		otpRepo:     otpRepo,
+		roleRepo:    roleRepo,
 		emailSender: emailSender,
 		cfg:         cfg,
 	}
@@ -80,7 +83,10 @@ func (u *AuthUsecase) Register(ctx context.Context, req request.RegisterRequest)
 	}
 
 	if u.emailSender != nil {
-		_ = u.emailSender.SendRegistrationOTP(req.Email, req.Name, otp)
+		if err := u.emailSender.SendRegistrationOTP(req.Email, req.Name, otp); err != nil {
+			_ = u.otpRepo.DeletePendingRegistration(ctx, req.Email)
+			return exception.Internal("failed to send registration OTP email", err)
+		}
 	}
 
 	return nil
@@ -120,23 +126,21 @@ func (u *AuthUsecase) VerifyOTP(ctx context.Context, req request.VerifyOTPReques
 		return nil, exception.Unauthorized("invalid or expired OTP code")
 	}
 
-	// Double check user doesn't already exist
-	existing, err := u.userRepo.FindByEmail(ctx, req.Email)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, exception.Conflict("email already registered")
+	var roleID *int
+	if u.roleRepo != nil {
+		buyerRole, err := u.roleRepo.FindByName(ctx, "BUYER")
+		if err == nil && buyerRole != nil {
+			roleID = &buyerRole.ID
+		}
 	}
 
-	defaultRoleID := 4
 	user := &entity.User{
 		ID:           uuid.New(),
 		Name:         pending.Name,
 		Email:        pending.Email,
 		PasswordHash: &pending.PasswordHash,
 		Provider:     "email",
-		RoleID:       &defaultRoleID,
+		RoleID:       roleID,
 	}
 
 	if err := u.userRepo.Create(ctx, user); err != nil {
@@ -175,14 +179,21 @@ func (u *AuthUsecase) OAuthLogin(ctx context.Context, email, name, provider, pro
 				return nil, err
 			}
 		} else {
-			defaultRoleID := 4
+			var roleID *int
+			if u.roleRepo != nil {
+				buyerRole, err := u.roleRepo.FindByName(ctx, "BUYER")
+				if err == nil && buyerRole != nil {
+					roleID = &buyerRole.ID
+				}
+			}
+
 			user = &entity.User{
 				ID:         uuid.New(),
 				Name:       name,
 				Email:      email,
 				Provider:   provider,
 				ProviderID: &providerID,
-				RoleID:     &defaultRoleID,
+				RoleID:     roleID,
 			}
 			if err := u.userRepo.Create(ctx, user); err != nil {
 				return nil, err
@@ -254,7 +265,10 @@ func (u *AuthUsecase) ForgotPassword(ctx context.Context, req request.ForgotPass
 	}
 
 	if u.emailSender != nil {
-		_ = u.emailSender.SendPasswordResetOTP(req.Email, otp)
+		if err := u.emailSender.SendPasswordResetOTP(req.Email, otp); err != nil {
+			_ = u.otpRepo.DeleteResetOTP(ctx, req.Email)
+			return exception.Internal("failed to send password reset email", err)
+		}
 	}
 
 	return nil

@@ -22,7 +22,7 @@ func NewRoleRepositoryMock() repository.RoleRepository {
 		roles: make(map[int]entity.Role),
 	}
 
-	defaultRoles := []string{"SUPER_ADMIN", "ADMIN", "ORGANIZER", "BUYER", "STAFF"}
+	defaultRoles := []string{"SUPER_ADMIN", "ADMIN", "ORGANIZER", "USER", "STAFF"}
 	for i, name := range defaultRoles {
 		id := i + 1
 		m.roles[id] = entity.Role{

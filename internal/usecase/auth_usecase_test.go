@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"concert-go/internal/config"
+	"concert-go/internal/domain/entity"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/exception"
 	"concert-go/internal/repository"
@@ -33,13 +34,14 @@ func setupAuthUsecase() (*usecase.AuthUsecase, repository.OTPRepository) {
 	userRepo := mock.NewUserRepositoryMock()
 	sessionRepo := mock.NewSessionRepositoryMock()
 	otpRepo := mock.NewOTPRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{
 		JWTSecret:           "test-secret-key-123",
 		JWTAccessExpMinutes: 15,
 		JWTRefreshExpDays:   7,
 	}
-	return usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, emailSender, cfg), otpRepo
+	return usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg), otpRepo
 }
 
 func TestAuthUsecase_Register_And_VerifyOTP_Success(t *testing.T) {
@@ -361,6 +363,67 @@ func TestAuthUsecase_ChangePassword(t *testing.T) {
 		}, "127.0.0.1", "test-agent")
 		if err != nil || loginRes == nil {
 			t.Fatalf("expected login with new password to succeed, got: %v", err)
+		}
+	})
+}
+
+type mockFailingEmailSender struct{}
+
+func (m *mockFailingEmailSender) SendEmail(to []string, subject string, body string, isHTML bool) error {
+	return errors.New("smtp connection refused")
+}
+
+func (m *mockFailingEmailSender) SendRegistrationOTP(to, name, otp string) error {
+	return errors.New("smtp connection refused")
+}
+
+func (m *mockFailingEmailSender) SendPasswordResetOTP(to, otp string) error {
+	return errors.New("smtp connection refused")
+}
+
+func TestAuthUsecase_EmailSendFailure(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	sessionRepo := mock.NewSessionRepositoryMock()
+	otpRepo := mock.NewOTPRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	failingEmail := &mockFailingEmailSender{}
+	cfg := &config.Config{JWTSecret: "test-secret"}
+	uc := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, failingEmail, cfg)
+
+	t.Run("register email failure deletes pending registration", func(t *testing.T) {
+		err := uc.Register(ctx, request.RegisterRequest{
+			Name:     "Fail User",
+			Email:    "failuser@example.com",
+			Password: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error on email failure")
+		}
+
+		pending, _ := otpRepo.GetPendingRegistration(ctx, "failuser@example.com")
+		if pending != nil {
+			t.Fatal("expected pending registration to be cleaned up from Redis on email failure")
+		}
+	})
+
+	t.Run("forgot password email failure deletes reset otp", func(t *testing.T) {
+		// First create a user
+		_ = userRepo.Create(ctx, &entity.User{
+			Email: "existing@example.com",
+			Name:  "Existing",
+		})
+
+		err := uc.ForgotPassword(ctx, request.ForgotPasswordRequest{
+			Email: "existing@example.com",
+		})
+		if err == nil {
+			t.Fatal("expected error on forgot password email failure")
+		}
+
+		otp, _ := otpRepo.GetResetOTP(ctx, "existing@example.com")
+		if otp != "" {
+			t.Fatal("expected reset OTP to be cleaned up from Redis on email failure")
 		}
 	})
 }
