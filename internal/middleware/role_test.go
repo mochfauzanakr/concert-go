@@ -61,7 +61,7 @@ func TestRequireRoleMiddleware(t *testing.T) {
 
 	t.Run("insufficient role returns 403", func(t *testing.T) {
 		r := gin.New()
-		buyer, _ := roleRepo.FindByName(context.Background(), "BUYER")
+		buyer, _ := roleRepo.FindByName(context.Background(), "USER")
 		r.Use(func(c *gin.Context) {
 			c.Set(middleware.UserSessionContextKey, model.UserSession{
 				UserID: uuid.New(),
