@@ -39,6 +39,13 @@ func RespondUnauthorized(c *gin.Context, message string) {
 	})
 }
 
+// RespondForbidden formats a 403 response
+func RespondForbidden(c *gin.Context, message string) {
+	c.JSON(http.StatusForbidden, response.ErrorResponse{
+		Message: message,
+	})
+}
+
 // RespondUnprocessable formats a 422 response
 func RespondUnprocessable(c *gin.Context) {
 	c.JSON(http.StatusUnprocessableEntity, response.ErrorResponse{

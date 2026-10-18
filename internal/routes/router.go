@@ -19,6 +19,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	{
 		HelloRoute(api)
 		AuthRoute(api, cfg)
+		RoleRoute(api)
 
 		// TODO: delete it in when it goes to main
 		DevRoute(api, cfg)
