@@ -10,6 +10,7 @@ type EmailSender interface {
 	SendEmail(to []string, subject string, body string, isHTML bool) error
 	SendRegistrationOTP(to, name, otp string) error
 	SendPasswordResetOTP(to, otp string) error
+	SendInviteLink(to, role, inviteURL string) error
 }
 
 type smtpEmailSender struct {
@@ -60,5 +61,11 @@ func (s *smtpEmailSender) SendRegistrationOTP(to, name, otp string) error {
 func (s *smtpEmailSender) SendPasswordResetOTP(to, otp string) error {
 	subject := "Your ConcertGo Password Reset Code"
 	body := fmt.Sprintf("Hello,\n\nYour password reset code is: %s\n\nThis code will expire in 5 minutes.\n\nIf you did not request a password reset, you can safely ignore this email.", otp)
+	return s.SendEmail([]string{to}, subject, body, false)
+}
+
+func (s *smtpEmailSender) SendInviteLink(to, role, inviteURL string) error {
+	subject := "You have been invited to join ConcertGo"
+	body := fmt.Sprintf("Hello,\n\nYou have been invited to join ConcertGo as %s.\n\nPlease click the following link to activate your account:\n%s\n\nThis invitation link will expire in 24 hours.", role, inviteURL)
 	return s.SendEmail([]string{to}, subject, body, false)
 }

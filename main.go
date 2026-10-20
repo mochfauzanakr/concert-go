@@ -23,6 +23,7 @@ func main() {
 			&entity.User{},
 			&entity.Session{},
 			&entity.Role{},
+			&entity.Invite{},
 		)
 		if err != nil {
 			log.Fatalf("Migration failed: %v", err)
