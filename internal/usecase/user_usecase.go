@@ -1,0 +1,218 @@
+package usecase
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"concert-go/internal/config"
+	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/payload/request"
+	"concert-go/internal/domain/payload/response"
+	"concert-go/internal/exception"
+	"concert-go/internal/repository"
+	"concert-go/internal/util"
+
+	"github.com/google/uuid"
+)
+
+type UserUsecase struct {
+	userRepo    repository.UserRepository
+	roleRepo    repository.RoleRepository
+	inviteRepo  repository.InviteRepository
+	emailSender util.EmailSender
+	cfg         *config.Config
+}
+
+func NewUserUsecase(
+	userRepo repository.UserRepository,
+	roleRepo repository.RoleRepository,
+	inviteRepo repository.InviteRepository,
+	emailSender util.EmailSender,
+	cfg *config.Config,
+) *UserUsecase {
+	return &UserUsecase{
+		userRepo:    userRepo,
+		roleRepo:    roleRepo,
+		inviteRepo:  inviteRepo,
+		emailSender: emailSender,
+		cfg:         cfg,
+	}
+}
+
+func (u *UserUsecase) InviteUser(ctx context.Context, inviterID uuid.UUID, inviterRoleID *int, req request.InviteUserRequest) (*response.InviteResponse, error) {
+	if err := util.ValidateEmailTLD(req.Email); err != nil {
+		return nil, exception.BadRequest(err.Error())
+	}
+
+	if inviterRoleID == nil {
+		return nil, exception.Forbidden("inviter has no assigned role")
+	}
+
+	inviterRole, err := u.roleRepo.FindByID(ctx, *inviterRoleID)
+	if err != nil || inviterRole == nil {
+		return nil, exception.Forbidden("inviter role not found")
+	}
+
+	targetRoleName := strings.ToUpper(strings.TrimSpace(req.Role))
+	targetRole, err := u.roleRepo.FindByName(ctx, targetRoleName)
+	if err != nil || targetRole == nil {
+		return nil, exception.BadRequest("invalid role specified")
+	}
+
+	switch strings.ToUpper(inviterRole.Name) {
+	case "SUPER_ADMIN":
+		if targetRoleName != "ADMIN" && targetRoleName != "ORGANIZER" {
+			return nil, exception.Forbidden("SUPER_ADMIN can only invite ADMIN or ORGANIZER")
+		}
+	case "ADMIN":
+		if targetRoleName != "ORGANIZER" {
+			return nil, exception.Forbidden("ADMIN can only invite ORGANIZER")
+		}
+	case "ORGANIZER":
+		if targetRoleName != "STAFF" {
+			return nil, exception.Forbidden("ORGANIZER can only invite STAFF")
+		}
+	default:
+		return nil, exception.Forbidden("you do not have permission to invite users")
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	existingUser, err := u.userRepo.FindByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if existingUser != nil {
+		return nil, exception.Conflict("email is already registered in the system")
+	}
+
+	pendingInvite, err := u.inviteRepo.FindPendingByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if pendingInvite != nil {
+		return nil, exception.Conflict("an active invitation already exists for this email")
+	}
+
+	rawToken := uuid.New().String() + "-" + uuid.New().String()
+	tokenHash := util.HashToken(rawToken)
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	invite := &entity.Invite{
+		ID:        uuid.New(),
+		Email:     email,
+		RoleID:    targetRole.ID,
+		InvitedBy: inviterID,
+		TokenHash: tokenHash,
+		Status:    entity.InviteStatusPending,
+		ExpiresAt: expiresAt,
+	}
+
+	if err := u.inviteRepo.Create(ctx, invite); err != nil {
+		return nil, err
+	}
+
+	inviteURL := "/accept-invite?token=" + rawToken
+	if u.emailSender != nil {
+		if err := u.emailSender.SendInviteLink(email, targetRole.Name, inviteURL); err != nil {
+			return nil, exception.Internal("failed to send invitation email", err)
+		}
+	}
+
+	return &response.InviteResponse{
+		ID:        invite.ID,
+		Email:     invite.Email,
+		Role:      targetRole.Name,
+		Status:    invite.Status,
+		ExpiresAt: invite.ExpiresAt,
+	}, nil
+}
+
+func (u *UserUsecase) AcceptInvite(ctx context.Context, req request.AcceptInviteRequest) (*response.UserResponse, error) {
+	if req.Password != req.ConfirmPassword {
+		return nil, exception.BadRequest("password and confirm password do not match")
+	}
+	if err := util.ValidatePassword(req.Password); err != nil {
+		return nil, exception.BadRequest(err.Error())
+	}
+
+	tokenHash := util.HashToken(req.Token)
+	invite, err := u.inviteRepo.FindByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return nil, err
+	}
+	if invite == nil || invite.Status != entity.InviteStatusPending || time.Now().After(invite.ExpiresAt) {
+		return nil, exception.BadRequest("invalid or expired invitation token")
+	}
+
+	existingUser, err := u.userRepo.FindByEmail(ctx, invite.Email)
+	if err != nil {
+		return nil, err
+	}
+	if existingUser != nil {
+		return nil, exception.Conflict("email is already registered")
+	}
+
+	hashedPassword, err := util.HashPassword(req.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	user := &entity.User{
+		ID:           uuid.New(),
+		RoleID:       &invite.RoleID,
+		Name:         strings.TrimSpace(req.Name),
+		Email:        invite.Email,
+		PasswordHash: &hashedPassword,
+		Provider:     "email",
+		Status:       entity.UserStatusActive,
+	}
+
+	if err := u.userRepo.Create(ctx, user); err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	_ = u.inviteRepo.UpdateStatus(ctx, invite.ID, entity.InviteStatusAccepted, &now)
+
+	return &response.UserResponse{
+		ID:        user.ID,
+		RoleID:    user.RoleID,
+		Name:      user.Name,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+	}, nil
+}
+
+func (u *UserUsecase) ValidateInvite(ctx context.Context, token string) (*response.InviteResponse, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, exception.BadRequest("invitation token is required")
+	}
+
+	tokenHash := util.HashToken(token)
+	invite, err := u.inviteRepo.FindByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return nil, err
+	}
+	if invite == nil || invite.Status != entity.InviteStatusPending || time.Now().After(invite.ExpiresAt) {
+		return nil, exception.BadRequest("invalid or expired invitation token")
+	}
+
+	roleName := "UNKNOWN"
+	if u.roleRepo != nil {
+		role, err := u.roleRepo.FindByID(ctx, invite.RoleID)
+		if err == nil && role != nil {
+			roleName = role.Name
+		}
+	}
+
+	return &response.InviteResponse{
+		ID:        invite.ID,
+		Email:     invite.Email,
+		Role:      roleName,
+		Status:    invite.Status,
+		ExpiresAt: invite.ExpiresAt,
+	}, nil
+}

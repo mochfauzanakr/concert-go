@@ -30,6 +30,9 @@ func (m *userRepositoryMock) Create(ctx context.Context, user *entity.User) erro
 	if user.ID == uuid.Nil {
 		user.ID = uuid.New()
 	}
+	if user.Status == "" {
+		user.Status = entity.UserStatusActive
+	}
 	now := time.Now()
 	user.CreatedAt = now
 	user.UpdatedAt = now

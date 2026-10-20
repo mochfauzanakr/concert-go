@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"time"
 
 	"concert-go/internal/domain/entity"
@@ -23,8 +24,8 @@ func NewUserRepository(db *sql.DB) repository.UserRepository {
 
 func (r *userRepositoryImpl) Create(ctx context.Context, user *entity.User) error {
 	query := `
-		INSERT INTO users (id, role_id, name, email, password_hash, provider, provider_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO users (id, role_id, name, email, password_hash, provider, provider_id, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	now := time.Now()
 	if user.ID == uuid.Nil {
@@ -32,6 +33,9 @@ func (r *userRepositoryImpl) Create(ctx context.Context, user *entity.User) erro
 	}
 	if user.Provider == "" {
 		user.Provider = "email"
+	}
+	if user.Status == "" {
+		user.Status = entity.UserStatusActive
 	}
 	user.CreatedAt = now
 	user.UpdatedAt = now
@@ -44,18 +48,25 @@ func (r *userRepositoryImpl) Create(ctx context.Context, user *entity.User) erro
 		user.PasswordHash,
 		user.Provider,
 		user.ProviderID,
+		user.Status,
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
+	if err != nil {
+		log.Printf("[SQL Error - User Create] %v", err)
+	}
 	return err
 }
 
 func (r *userRepositoryImpl) Update(ctx context.Context, user *entity.User) error {
 	query := `
 		UPDATE users
-		SET role_id = $1, name = $2, email = $3, password_hash = $4, provider = $5, provider_id = $6, updated_at = $7
-		WHERE id = $8 AND deleted_at IS NULL
+		SET role_id = $1, name = $2, email = $3, password_hash = $4, provider = $5, provider_id = $6, status = $7, updated_at = $8
+		WHERE id = $9 AND deleted_at IS NULL
 	`
+	if user.Status == "" {
+		user.Status = entity.UserStatusActive
+	}
 	user.UpdatedAt = time.Now()
 	_, err := r.db.ExecContext(ctx, query,
 		user.RoleID,
@@ -64,15 +75,19 @@ func (r *userRepositoryImpl) Update(ctx context.Context, user *entity.User) erro
 		user.PasswordHash,
 		user.Provider,
 		user.ProviderID,
+		user.Status,
 		user.UpdatedAt,
 		user.ID,
 	)
+	if err != nil {
+		log.Printf("[SQL Error - User Update] %v", err)
+	}
 	return err
 }
 
 func (r *userRepositoryImpl) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
 	query := `
-		SELECT id, role_id, name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at
+		SELECT id, role_id, name, email, password_hash, provider, provider_id, status, created_at, updated_at, deleted_at
 		FROM users
 		WHERE email = $1 AND deleted_at IS NULL
 		LIMIT 1
@@ -83,7 +98,7 @@ func (r *userRepositoryImpl) FindByEmail(ctx context.Context, email string) (*en
 
 func (r *userRepositoryImpl) FindByID(ctx context.Context, id uuid.UUID) (*entity.User, error) {
 	query := `
-		SELECT id, role_id, name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at
+		SELECT id, role_id, name, email, password_hash, provider, provider_id, status, created_at, updated_at, deleted_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
 		LIMIT 1
@@ -94,7 +109,7 @@ func (r *userRepositoryImpl) FindByID(ctx context.Context, id uuid.UUID) (*entit
 
 func (r *userRepositoryImpl) FindByProvider(ctx context.Context, provider, providerID string) (*entity.User, error) {
 	query := `
-		SELECT id, role_id, name, email, password_hash, provider, provider_id, created_at, updated_at, deleted_at
+		SELECT id, role_id, name, email, password_hash, provider, provider_id, status, created_at, updated_at, deleted_at
 		FROM users
 		WHERE provider = $1 AND provider_id = $2 AND deleted_at IS NULL
 		LIMIT 1
@@ -111,6 +126,7 @@ func scanUser(row interface{ Scan(dest ...interface{}) error }) (*entity.User, e
 	var roleID sql.NullInt64
 	var passwordHash sql.NullString
 	var providerID sql.NullString
+	var status sql.NullString
 
 	err := row.Scan(
 		&u.ID,
@@ -120,6 +136,7 @@ func scanUser(row interface{ Scan(dest ...interface{}) error }) (*entity.User, e
 		&passwordHash,
 		&u.Provider,
 		&providerID,
+		&status,
 		&createdAt,
 		&updatedAt,
 		&deletedAt,
@@ -128,6 +145,7 @@ func scanUser(row interface{ Scan(dest ...interface{}) error }) (*entity.User, e
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
+		log.Printf("[SQL Error - Scan User] %v", err)
 		return nil, err
 	}
 
@@ -140,6 +158,9 @@ func scanUser(row interface{ Scan(dest ...interface{}) error }) (*entity.User, e
 	}
 	if providerID.Valid {
 		u.ProviderID = &providerID.String
+	}
+	if status.Valid {
+		u.Status = status.String
 	}
 	if createdAt.Valid {
 		u.CreatedAt = createdAt.Time
