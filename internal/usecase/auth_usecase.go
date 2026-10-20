@@ -105,6 +105,10 @@ func (u *AuthUsecase) Login(ctx context.Context, req request.LoginRequest, ipAdd
 		return nil, exception.Unauthorized("invalid email or password")
 	}
 
+	if user.Status == entity.UserStatusSuspended {
+		return nil, exception.Forbidden("account is suspended, please contact administrator")
+	}
+
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
 	if err != nil {
 		return nil, err
@@ -199,6 +203,10 @@ func (u *AuthUsecase) OAuthLogin(ctx context.Context, email, name, provider, pro
 				return nil, err
 			}
 		}
+	}
+
+	if user.Status == entity.UserStatusSuspended {
+		return nil, exception.Forbidden("account is suspended, please contact administrator")
 	}
 
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
