@@ -79,7 +79,16 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 
 #### F-1.5 Me (Data Pengguna Login)
 - **Akses**: Pengguna Login (Bearer Token).
-- **Output**: ID, nama, email, role, permissions, dan metadata sesi.
+- **Output**: ID, nama, email, role, avatarUrl, permissions, dan metadata sesi.
+
+#### F-1.6 Edit Profile (Self)
+- **Akses**: Pengguna Login (Semua Role).
+- **Endpoint**: `PUT /api/users/me`.
+- **Content-Type**: `multipart/form-data` atau `application/json`.
+- **Input**:
+  - `name`: string (opsional, min 2, max 100).
+  - `avatar`: file gambar (opsional, tipe: `.jpg`, `.jpeg`, `.png`, `.webp`, ukuran maksimal 2 MB).
+- **Penyimpanan Gambar**: Auto-fallback (unggah ke Cloudinary jika API key tersedia di konfigurasi, fallback ke local storage server jika belum diset).
 
 ---
 
@@ -117,9 +126,37 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
   - Jika valid, akun diaktifkan dengan role yang telah ditentukan saat diundang.
   - Token invite ditandai sebagai `ACCEPTED` (tidak bisa digunakan ulang).
 
-#### F-2.4 User Detail & Suspend
+#### F-2.4 User Detail & Status Management (Suspend / Reactivate)
 - **Akses**: `SUPER_ADMIN` dan `ADMIN`.
-- **Fitur**: Melihat riwayat aktivitas akun dan menonaktifkan akun yang melanggar aturan.
+- **Endpoint**:
+  - `GET /api/users/:id` (Detail Pengguna)
+  - `PATCH /api/users/:id/status` (Ubah Status Pengguna)
+- **Input PATCH**:
+  ```json
+  {
+    "status": "SUSPENDED" // Nilai valid: "ACTIVE", "SUSPENDED"
+  }
+  ```
+- **Aturan Bisnis**:
+  - Tidak dapat mengubah status akun diri sendiri (*self-lockout prevention*).
+  - Role `SUPER_ADMIN` tidak dapat di-suspend oleh siapapun.
+  - Role `ADMIN` tidak dapat men-suspend `SUPER_ADMIN` maupun sesama `ADMIN`.
+  - Ketika akun di-suspend, seluruh sesi aktif dibatalkan dan pengguna langsung ditolak saat mencoba login atau refresh token.
+
+#### F-2.5 Admin Edit User
+- **Akses**: `SUPER_ADMIN` dan `ADMIN`.
+- **Endpoint**: `PUT /api/users/:id`.
+- **Input**:
+  ```json
+  {
+    "name": "Updated Name",
+    "roleId": 3
+  }
+  ```
+- **Aturan Bisnis**:
+  - `ADMIN` tidak dapat mengubah data maupun role sesama `ADMIN` atau `SUPER_ADMIN`.
+  - Pengguna tidak dapat mengubah rolenya sendiri menjadi lebih rendah (*anti-self-demotion*).
+  - Role baru yang dipilih wajib terdaftar di database.
 
 ---
 
@@ -132,4 +169,8 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 
 #### F-3.2 Event Staff Management
 - **Akses**: `ORGANIZER`.
-- **Fitur**: Mengundang staf (`STAFF`) per-event untuk bertugas sebagai checker gerbang (gate ticket scanning).
+- **Prinsip**: Terisolasi per-organizer (organizer hanya melihat dan mengelola staf mereka sendiri, terpisah dari `GET /api/users` platform).
+- **Endpoint**:
+  - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan pagination & search).
+  - `GET /api/events/:eventId/staff`: Daftar staf yang ditugaskan khusus pada suatu event untuk gerbang scan tiket.
+  - `POST /api/events/:eventId/staff/assign`: Menugaskan staf ke gerbang event tertentu.
