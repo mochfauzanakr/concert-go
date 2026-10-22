@@ -218,6 +218,27 @@ func (u *UserUsecase) ValidateInvite(ctx context.Context, token string) (*respon
 	}, nil
 }
 
+func (u *UserUsecase) GetUserDetail(ctx context.Context, id uuid.UUID) (*response.UserDetailResponse, error) {
+	user, err := u.userRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, exception.NotFound("user not found")
+	}
+
+	return &response.UserDetailResponse{
+		ID:        user.ID,
+		RoleID:    user.RoleID,
+		Name:      user.Name,
+		Email:     user.Email,
+		AvatarURL: user.AvatarURL,
+		Provider:  user.Provider,
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt,
+	}, nil
+}
+
 func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRequest) (*response.PageResponse[response.UserListItemResponse], error) {
 	page := req.Page
 	if page <= 0 {

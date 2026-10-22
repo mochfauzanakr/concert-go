@@ -93,6 +93,23 @@ func (h *UserHandler) ValidateInvite(c *gin.Context) {
 	util.RespondOK(c, "Invitation token is valid", res, nil)
 }
 
+func (h *UserHandler) GetUserDetail(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		util.RespondBadRequest(c, "Invalid user ID format", err.Error())
+		return
+	}
+
+	user, err := h.userUsecase.GetUserDetail(c.Request.Context(), id)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "User fetched successfully", user, nil)
+}
+
 func (h *UserHandler) GetAllUsers(c *gin.Context) {
 	page := util.ParseQueryInt(c, "page", 1)
 	pageSize := util.ParseQueryInt(c, "pageSize", 10)

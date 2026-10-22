@@ -282,6 +282,54 @@ func TestUserUsecase_ValidateInvite(t *testing.T) {
 	})
 }
 
+func TestUserUsecase_GetUserDetail(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	emailSender := &mockEmailSender{}
+	cfg := &config.Config{}
+
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+
+	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+	userID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       userID,
+		RoleID:   &organizerRole.ID,
+		Name:     "Existing Organizer",
+		Email:    "organizer@example.com",
+		Provider: "email",
+		Status:   entity.UserStatusActive,
+	})
+
+	t.Run("user not found", func(t *testing.T) {
+		_, err := uc.GetUserDetail(ctx, uuid.New())
+		if err == nil {
+			t.Fatal("expected error for non-existent user ID")
+		}
+	})
+
+	t.Run("user found", func(t *testing.T) {
+		res, err := uc.GetUserDetail(ctx, userID)
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if res.ID != userID {
+			t.Errorf("expected user ID %s, got %s", userID, res.ID)
+		}
+		if res.Email != "organizer@example.com" {
+			t.Errorf("expected email organizer@example.com, got %s", res.Email)
+		}
+		if res.RoleID == nil || *res.RoleID != organizerRole.ID {
+			t.Errorf("expected roleId %d, got %v", organizerRole.ID, res.RoleID)
+		}
+		if res.Status != entity.UserStatusActive {
+			t.Errorf("expected status ACTIVE, got %s", res.Status)
+		}
+	})
+}
+
 func TestUserUsecase_GetAllUsers(t *testing.T) {
 	ctx := context.Background()
 	userRepo := mock.NewUserRepositoryMock()
