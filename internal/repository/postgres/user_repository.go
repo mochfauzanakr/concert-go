@@ -118,6 +118,79 @@ func (r *userRepositoryImpl) FindByProvider(ctx context.Context, provider, provi
 	return scanUser(row)
 }
 
+func (r *userRepositoryImpl) FindAll(ctx context.Context, filter repository.UserFilter) ([]*entity.User, int, error) {
+	where := []string{"deleted_at IS NULL"}
+	var args []interface{}
+	argIdx := 1
+
+	if filter.Search != "" {
+		where = append(where, fmt.Sprintf("(LOWER(name) LIKE $%d OR LOWER(email) LIKE $%d)", argIdx, argIdx))
+		args = append(args, "%"+strings.ToLower(filter.Search)+"%")
+		argIdx++
+	}
+
+	if filter.RoleID != nil {
+		where = append(where, fmt.Sprintf("role_id = $%d", argIdx))
+		args = append(args, *filter.RoleID)
+		argIdx++
+	}
+
+	if filter.Status != "" {
+		where = append(where, fmt.Sprintf("status = $%d", argIdx))
+		args = append(args, filter.Status)
+		argIdx++
+	}
+
+	whereClause := strings.Join(where, " AND ")
+
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users WHERE %s", whereClause)
+	var total int
+	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+	if err != nil {
+		log.Printf("[SQL Error - Count Users] %v", err)
+		return nil, 0, err
+	}
+
+	dataQuery := fmt.Sprintf(`
+		SELECT id, role_id, name, email, password_hash, provider, provider_id, avatar_url, status, created_at, updated_at, deleted_at
+		FROM users
+		WHERE %s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIdx, argIdx+1)
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	dataArgs := append(args, limit, filter.Offset)
+
+	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
+	if err != nil {
+		log.Printf("[SQL Error - Query Users] %v", err)
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	users := make([]*entity.User, 0)
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		if u != nil {
+			users = append(users, u)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("[SQL Error - Users Rows] %v", err)
+		return nil, 0, err
+	}
+
+	return users, total, nil
+}
+
 func scanUser(row interface{ Scan(dest ...interface{}) error }) (*entity.User, error) {
 	var u entity.User
 	var deletedAt sql.NullTime

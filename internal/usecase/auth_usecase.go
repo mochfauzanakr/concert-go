@@ -26,7 +26,6 @@ type AuthUsecase struct {
 	cfg         *config.Config
 }
 
-// NewAuthUsecase constructor
 func NewAuthUsecase(
 	userRepo repository.UserRepository,
 	sessionRepo repository.SessionRepository,

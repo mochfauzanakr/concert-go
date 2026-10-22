@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"mime/multipart"
 	"testing"
 	"time"
 
@@ -280,3 +281,101 @@ func TestUserUsecase_ValidateInvite(t *testing.T) {
 		}
 	})
 }
+
+func TestUserUsecase_GetAllUsers(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	emailSender := &mockEmailSender{}
+	cfg := &config.Config{}
+
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+
+	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
+	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+
+	_ = userRepo.Create(ctx, &entity.User{
+		Name:     "Alice Admin",
+		Email:    "alice@example.com",
+		RoleID:   &adminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		Name:     "Bob Buyer",
+		Email:    "bob@example.com",
+		RoleID:   &buyerRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		Name:     "Charlie Suspended",
+		Email:    "charlie@example.com",
+		RoleID:   &buyerRole.ID,
+		Status:   entity.UserStatusSuspended,
+		Provider: "email",
+	})
+
+	t.Run("all users pagination", func(t *testing.T) {
+		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
+			Page:     1,
+			PageSize: 2,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(pageRes.Items) != 2 {
+			t.Errorf("expected 2 items, got %d", len(pageRes.Items))
+		}
+		if pageRes.Pagination.TotalRecords != 3 {
+			t.Errorf("expected 3 total records, got %d", pageRes.Pagination.TotalRecords)
+		}
+		if pageRes.Pagination.TotalPage != 2 {
+			t.Errorf("expected 2 total pages, got %d", pageRes.Pagination.TotalPage)
+		}
+		if pageRes.Pagination.NextPage == nil || *pageRes.Pagination.NextPage != 2 {
+			t.Errorf("expected next page to be 2")
+		}
+	})
+
+	t.Run("filter by search", func(t *testing.T) {
+		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
+			Search: "alice",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(pageRes.Items) != 1 || pageRes.Items[0].Name != "Alice Admin" {
+			t.Errorf("expected Alice Admin, got %+v", pageRes.Items)
+		}
+		if pageRes.Pagination.TotalRecords != 1 {
+			t.Errorf("expected 1 record, got %d", pageRes.Pagination.TotalRecords)
+		}
+	})
+
+	t.Run("filter by role", func(t *testing.T) {
+		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
+			RoleID: &adminRole.ID,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(pageRes.Items) != 1 || pageRes.Items[0].Email != "alice@example.com" {
+			t.Errorf("expected alice@example.com, got %+v", pageRes.Items)
+		}
+	})
+
+	t.Run("filter by status", func(t *testing.T) {
+		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
+			Status: "SUSPENDED",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(pageRes.Items) != 1 || pageRes.Items[0].Name != "Charlie Suspended" {
+			t.Errorf("expected Charlie Suspended, got %+v", pageRes.Items)
+		}
+	})
+}
+

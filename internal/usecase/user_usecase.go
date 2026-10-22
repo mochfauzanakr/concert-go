@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"mime/multipart"
 	"strings"
 	"time"
 
@@ -216,3 +217,55 @@ func (u *UserUsecase) ValidateInvite(ctx context.Context, token string) (*respon
 		ExpiresAt: invite.ExpiresAt,
 	}, nil
 }
+
+func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRequest) (*response.PageResponse[response.UserListItemResponse], error) {
+	page := req.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 20 {
+		pageSize = 20
+	}
+
+	search := strings.TrimSpace(req.Search)
+	status := strings.ToUpper(strings.TrimSpace(req.Status))
+	offset := model.CalculateOffset(page, pageSize)
+
+	filter := repository.UserFilter{
+		Search: search,
+		RoleID: req.RoleID,
+		Status: status,
+		Limit:  pageSize,
+		Offset: offset,
+	}
+
+	users, total, err := u.userRepo.FindAll(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]response.UserListItemResponse, 0, len(users))
+	for _, user := range users {
+		items = append(items, response.UserListItemResponse{
+			ID:        user.ID,
+			RoleID:    user.RoleID,
+			Name:      user.Name,
+			Email:     user.Email,
+			AvatarURL: user.AvatarURL,
+			Status:    user.Status,
+			CreatedAt: user.CreatedAt,
+		})
+	}
+
+	pagination := model.BuildPagination(total, page, pageSize)
+
+	return &response.PageResponse[response.UserListItemResponse]{
+		Items:      items,
+		Pagination: pagination,
+	}, nil
+}
+

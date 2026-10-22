@@ -11,3 +11,10 @@ type AcceptInviteRequest struct {
 	Password        string `json:"password" binding:"required,min=8,max=128"`
 	ConfirmPassword string `json:"confirmPassword" binding:"required,min=8,max=128"`
 }
+type GetUserListRequest struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Search   string `json:"search"`
+	RoleID   *int   `json:"roleId"`
+	Status   string `json:"status"`
+}

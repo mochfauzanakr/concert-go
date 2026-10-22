@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"mime/multipart"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/middleware"
@@ -9,6 +12,7 @@ import (
 	"concert-go/internal/util"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type UserHandler struct {
@@ -19,7 +23,6 @@ func NewUserHandler(userUsecase *usecase.UserUsecase) *UserHandler {
 	return &UserHandler{userUsecase: userUsecase}
 }
 
-// InviteUser handles user invitation dispatch (SUPER_ADMIN, ADMIN, ORGANIZER)
 func (h *UserHandler) InviteUser(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)
 	if !ok || session == nil {
@@ -46,7 +49,6 @@ func (h *UserHandler) InviteUser(c *gin.Context) {
 	})
 }
 
-// AcceptInvite activates invited user account
 func (h *UserHandler) AcceptInvite(c *gin.Context) {
 	var req request.AcceptInviteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -75,7 +77,6 @@ func (h *UserHandler) AcceptInvite(c *gin.Context) {
 	})
 }
 
-// ValidateInvite checks if an invite token is valid and returns its metadata
 func (h *UserHandler) ValidateInvite(c *gin.Context) {
 	token := c.Query("token")
 	if token == "" {
@@ -91,3 +92,41 @@ func (h *UserHandler) ValidateInvite(c *gin.Context) {
 
 	util.RespondOK(c, "Invitation token is valid", res, nil)
 }
+
+func (h *UserHandler) GetAllUsers(c *gin.Context) {
+	page := util.ParseQueryInt(c, "page", 1)
+	pageSize := util.ParseQueryInt(c, "pageSize", 10)
+	if c.Query("pageSize") == "" && c.Query("limit") != "" {
+		pageSize = util.ParseQueryInt(c, "limit", 10)
+	}
+
+	search := strings.TrimSpace(c.Query("search"))
+	if search == "" {
+		search = strings.TrimSpace(c.Query("searchQuery"))
+	}
+	status := strings.TrimSpace(c.Query("status"))
+
+	var roleID *int
+	if rawRole := strings.TrimSpace(c.Query("roleId")); rawRole != "" {
+		if id, err := strconv.Atoi(rawRole); err == nil {
+			roleID = &id
+		}
+	}
+
+	req := request.GetUserListRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Search:   search,
+		RoleID:   roleID,
+		Status:   status,
+	}
+
+	res, err := h.userUsecase.GetAllUsers(c.Request.Context(), req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Users fetched successfully", res.Items, &res.Pagination)
+}
+

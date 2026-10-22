@@ -2,6 +2,8 @@ package mock
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,4 +84,50 @@ func (m *userRepositoryMock) FindByID(ctx context.Context, id uuid.UUID) (*entit
 		return u, nil
 	}
 	return nil, nil
+}
+
+func (m *userRepositoryMock) FindAll(ctx context.Context, filter repository.UserFilter) ([]*entity.User, int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var filtered []*entity.User
+	searchLower := strings.ToLower(strings.TrimSpace(filter.Search))
+
+	for _, u := range m.users {
+		if u.DeletedAt.Valid {
+			continue
+		}
+		if searchLower != "" {
+			nameMatch := strings.Contains(strings.ToLower(u.Name), searchLower)
+			emailMatch := strings.Contains(strings.ToLower(u.Email), searchLower)
+			if !nameMatch && !emailMatch {
+				continue
+			}
+		}
+		if filter.RoleID != nil {
+			if u.RoleID == nil || *u.RoleID != *filter.RoleID {
+				continue
+			}
+		}
+		if filter.Status != "" && u.Status != filter.Status {
+			continue
+		}
+		filtered = append(filtered, u)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	total := len(filtered)
+	start := filter.Offset
+	if start > total {
+		start = total
+	}
+	end := start + filter.Limit
+	if filter.Limit <= 0 || end > total {
+		end = total
+	}
+
+	return filtered[start:end], total, nil
 }

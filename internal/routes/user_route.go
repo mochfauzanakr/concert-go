@@ -30,7 +30,8 @@ func UserRoute(router *gin.RouterGroup, cfg *config.Config) {
 		protected := users.Group("")
 		protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 		{
-			// Invite user (only SUPER_ADMIN, ADMIN, and ORGANIZER)
+			
+			protected.GET("", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.GetAllUsers)
 			protected.POST("/invite", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN", "ORGANIZER"), userHandler.InviteUser)
 		}
 	}
