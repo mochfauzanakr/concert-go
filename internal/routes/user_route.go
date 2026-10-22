@@ -32,6 +32,8 @@ func UserRoute(router *gin.RouterGroup, cfg *config.Config) {
 		{
 			
 			protected.GET("", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.GetAllUsers)
+			protected.PUT("/:id", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.AdminUpdateUser)
+			
 			protected.POST("/invite", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN", "ORGANIZER"), userHandler.InviteUser)
 			
 			protected.PATCH("/:id/status", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.UpdateUserStatus)

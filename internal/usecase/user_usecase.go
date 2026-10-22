@@ -334,3 +334,81 @@ func (u *UserUsecase) UpdateUserStatus(
 	}, nil
 }
 
+
+func (u *UserUsecase) AdminUpdateUser(
+	ctx context.Context,
+	actorID uuid.UUID,
+	actorRoleID *int,
+	targetUserID uuid.UUID,
+	req request.AdminUpdateUserRequest,
+) (*response.UserDetailResponse, error) {
+	name := strings.TrimSpace(req.Name)
+	if len(name) < 2 || len(name) > 100 {
+		return nil, exception.BadRequest("name must be between 2 and 100 characters")
+	}
+
+	actorRoleName := ""
+	if actorRoleID != nil && u.roleRepo != nil {
+		r, err := u.roleRepo.FindByID(ctx, *actorRoleID)
+		if err == nil && r != nil {
+			actorRoleName = r.Name
+		}
+	}
+
+	targetUser, err := u.userRepo.FindByID(ctx, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if targetUser == nil {
+		return nil, exception.NotFound("user not found")
+	}
+
+	targetRoleName := "UNKNOWN"
+	if targetUser.RoleID != nil && u.roleRepo != nil {
+		r, err := u.roleRepo.FindByID(ctx, *targetUser.RoleID)
+		if err == nil && r != nil {
+			targetRoleName = r.Name
+		}
+	}
+
+	newRole, err := u.roleRepo.FindByID(ctx, req.RoleID)
+	if err != nil || newRole == nil {
+		return nil, exception.BadRequest("role not found")
+	}
+
+	// 1. Cannot change your own role
+	if actorID == targetUserID && actorRoleID != nil && *actorRoleID != req.RoleID {
+		return nil, exception.Forbidden("cannot change your own role")
+	}
+
+	// 2. ADMIN cannot edit SUPER_ADMIN or other ADMIN
+	if actorRoleName == "ADMIN" && (targetRoleName == "SUPER_ADMIN" || targetRoleName == "ADMIN") {
+		return nil, exception.Forbidden("admins cannot edit other admins or super admins")
+	}
+
+	// 3. Only SUPER_ADMIN can assign SUPER_ADMIN role
+	if newRole.Name == "SUPER_ADMIN" && actorRoleName != "SUPER_ADMIN" {
+		return nil, exception.Forbidden("only super admin can assign super admin role")
+	}
+	if targetRoleName == "SUPER_ADMIN" && actorRoleName != "SUPER_ADMIN" {
+		return nil, exception.Forbidden("cannot edit super admin")
+	}
+
+	targetUser.Name = name
+	targetUser.RoleID = &req.RoleID
+
+	if err := u.userRepo.Update(ctx, targetUser); err != nil {
+		return nil, err
+	}
+
+	return &response.UserDetailResponse{
+		ID:        targetUser.ID,
+		RoleID:    targetUser.RoleID,
+		Name:      targetUser.Name,
+		Email:     targetUser.Email,
+		AvatarURL: targetUser.AvatarURL,
+		Provider:  targetUser.Provider,
+		Status:    targetUser.Status,
+		CreatedAt: targetUser.CreatedAt,
+	}, nil
+}

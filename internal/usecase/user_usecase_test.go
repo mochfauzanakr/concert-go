@@ -504,3 +504,116 @@ func TestUserUsecase_UpdateUserStatus(t *testing.T) {
 	})
 }
 
+
+func TestUserUsecase_AdminUpdateUser(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	emailSender := &mockEmailSender{}
+	cfg := &config.Config{}
+
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+
+	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
+	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
+	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+
+	superAdminID := uuid.New()
+	admin1ID := uuid.New()
+	admin2ID := uuid.New()
+	buyerID := uuid.New()
+
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       superAdminID,
+		Name:     "Super Admin",
+		Email:    "super@example.com",
+		RoleID:   &superAdminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       admin1ID,
+		Name:     "Admin 1",
+		Email:    "admin1@example.com",
+		RoleID:   &adminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       admin2ID,
+		Name:     "Admin 2",
+		Email:    "admin2@example.com",
+		RoleID:   &adminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       buyerID,
+		Name:     "Buyer Bob",
+		Email:    "buyer@example.com",
+		RoleID:   &buyerRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+
+	t.Run("cannot change own role", func(t *testing.T) {
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, admin1ID, request.AdminUpdateUserRequest{
+			Name:   "Admin 1 Renamed",
+			RoleID: buyerRole.ID,
+		})
+		if err == nil {
+			t.Fatal("expected error on self role demotion/change")
+		}
+	})
+
+	t.Run("ADMIN cannot edit other ADMIN", func(t *testing.T) {
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, admin2ID, request.AdminUpdateUserRequest{
+			Name:   "Admin 2 Renamed",
+			RoleID: organizerRole.ID,
+		})
+		if err == nil {
+			t.Fatal("expected error when admin edits another admin")
+		}
+	})
+
+	t.Run("ADMIN cannot promote to SUPER_ADMIN", func(t *testing.T) {
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+			Name:   "Buyer Promoted",
+			RoleID: superAdminRole.ID,
+		})
+		if err == nil {
+			t.Fatal("expected error when admin attempts to promote to super admin")
+		}
+	})
+
+	t.Run("ADMIN can update BUYER to ORGANIZER", func(t *testing.T) {
+		res, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+			Name:   "Buyer To Organizer",
+			RoleID: organizerRole.ID,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Name != "Buyer To Organizer" {
+			t.Errorf("expected name 'Buyer To Organizer', got %s", res.Name)
+		}
+		if res.RoleID == nil || *res.RoleID != organizerRole.ID {
+			t.Errorf("expected roleId %d, got %v", organizerRole.ID, res.RoleID)
+		}
+	})
+
+	t.Run("SUPER_ADMIN can update ADMIN role", func(t *testing.T) {
+		res, err := uc.AdminUpdateUser(ctx, superAdminID, &superAdminRole.ID, admin2ID, request.AdminUpdateUserRequest{
+			Name:   "Admin 2 Downgraded",
+			RoleID: organizerRole.ID,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.RoleID == nil || *res.RoleID != organizerRole.ID {
+			t.Errorf("expected roleId %d, got %v", organizerRole.ID, res.RoleID)
+		}
+	})
+}
