@@ -176,6 +176,37 @@ func (h *UserHandler) UpdateUserStatus(c *gin.Context) {
 	util.RespondOK(c, "User status updated successfully", user, nil)
 }
 
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	name := c.PostForm("name")
+	var avatarHeader *multipart.FileHeader
+
+	contentType := c.GetHeader("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		file, err := c.FormFile("avatar")
+		if err == nil {
+			avatarHeader = file
+		}
+	} else {
+		var req request.UpdateProfileRequest
+		if err := c.ShouldBindJSON(&req); err == nil && req.Name != "" {
+			name = req.Name
+		}
+	}
+
+	user, err := h.userUsecase.UpdateProfile(c.Request.Context(), session.UserID, name, avatarHeader)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Profile updated successfully", user, nil)
+}
 
 func (h *UserHandler) AdminUpdateUser(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)

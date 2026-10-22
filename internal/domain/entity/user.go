@@ -20,6 +20,7 @@ type User struct {
 	PasswordHash *string        `gorm:"column:password_hash;type:varchar(255)" json:"-"`
 	Provider     string         `gorm:"column:provider;type:varchar(50);default:'email';not null" json:"provider"`
 	ProviderID   *string        `gorm:"column:provider_id;type:varchar(255)" json:"providerId,omitempty"`
+	AvatarURL    *string        `gorm:"column:avatar_url;type:varchar(255)" json:"avatarUrl,omitempty"`
 	Status       string         `gorm:"column:status;type:varchar(50);default:'ACTIVE';not null" json:"status"`
 	CreatedAt    time.Time      `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 	UpdatedAt    time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updatedAt"`

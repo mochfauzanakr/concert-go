@@ -8,6 +8,7 @@ import (
 
 	"concert-go/internal/config"
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/domain/payload/response"
 	"concert-go/internal/exception"
@@ -18,11 +19,12 @@ import (
 )
 
 type UserUsecase struct {
-	userRepo    repository.UserRepository
-	roleRepo    repository.RoleRepository
-	inviteRepo  repository.InviteRepository
-	emailSender util.EmailSender
-	cfg         *config.Config
+	userRepo       repository.UserRepository
+	roleRepo       repository.RoleRepository
+	inviteRepo     repository.InviteRepository
+	emailSender    util.EmailSender
+	storageService util.StorageService
+	cfg            *config.Config
 }
 
 func NewUserUsecase(
@@ -30,14 +32,16 @@ func NewUserUsecase(
 	roleRepo repository.RoleRepository,
 	inviteRepo repository.InviteRepository,
 	emailSender util.EmailSender,
+	storageService util.StorageService,
 	cfg *config.Config,
 ) *UserUsecase {
 	return &UserUsecase{
-		userRepo:    userRepo,
-		roleRepo:    roleRepo,
-		inviteRepo:  inviteRepo,
-		emailSender: emailSender,
-		cfg:         cfg,
+		userRepo:       userRepo,
+		roleRepo:       roleRepo,
+		inviteRepo:     inviteRepo,
+		emailSender:    emailSender,
+		storageService: storageService,
+		cfg:            cfg,
 	}
 }
 
@@ -355,6 +359,54 @@ func (u *UserUsecase) UpdateUserStatus(
 	}, nil
 }
 
+func (u *UserUsecase) UpdateProfile(
+	ctx context.Context,
+	userID uuid.UUID,
+	name string,
+	avatarHeader *multipart.FileHeader,
+) (*response.UserDetailResponse, error) {
+	user, err := u.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, exception.NotFound("user not found")
+	}
+
+	name = strings.TrimSpace(name)
+	if name != "" {
+		if len(name) < 2 || len(name) > 100 {
+			return nil, exception.BadRequest("name must be between 2 and 100 characters")
+		}
+		user.Name = name
+	}
+
+	if avatarHeader != nil {
+		if u.storageService == nil {
+			return nil, exception.Internal("storage service not configured", nil)
+		}
+		avatarURL, err := u.storageService.Upload(ctx, avatarHeader, "avatars")
+		if err != nil {
+			return nil, err
+		}
+		user.AvatarURL = &avatarURL
+	}
+
+	if err := u.userRepo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+
+	return &response.UserDetailResponse{
+		ID:        user.ID,
+		RoleID:    user.RoleID,
+		Name:      user.Name,
+		Email:     user.Email,
+		AvatarURL: user.AvatarURL,
+		Provider:  user.Provider,
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt,
+	}, nil
+}
 
 func (u *UserUsecase) AdminUpdateUser(
 	ctx context.Context,

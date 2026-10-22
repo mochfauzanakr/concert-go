@@ -16,8 +16,9 @@ func UserRoute(router *gin.RouterGroup, cfg *config.Config) {
 	roleRepo := postgres.NewRoleRepository(config.SqlDB)
 	inviteRepo := postgres.NewInviteRepository(config.SqlDB)
 	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
+	storageService := util.NewStorageService(cfg)
 
-	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, cfg)
+	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, storageService, cfg)
 	userHandler := handler.NewUserHandler(userUsecase)
 
 	users := router.Group("/users")
@@ -33,6 +34,8 @@ func UserRoute(router *gin.RouterGroup, cfg *config.Config) {
 			
 			protected.GET("", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.GetAllUsers)
 			protected.GET("/:id", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.GetUserDetail)
+			
+			protected.PUT("/me", userHandler.UpdateProfile)
 			protected.PUT("/:id", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN"), userHandler.AdminUpdateUser)
 			
 			protected.POST("/invite", middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN", "ORGANIZER"), userHandler.InviteUser)

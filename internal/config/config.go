@@ -34,6 +34,11 @@ type Config struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	GoogleRedirectURL  string
+	CloudinaryCloudName    string
+	CloudinaryAPIKey       string
+	CloudinaryAPISecret    string
+	CloudinaryUploadFolder string
+	LocalStoragePath       string
 }
 
 // LoadConfig reads the .env file and sets up the configuration
@@ -92,6 +97,11 @@ func LoadConfig() *Config {
 		GoogleClientID:      getEnvOrDefault("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret:  getEnvOrDefault("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURL:   getEnvOrDefault("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/auth/google/callback"),
+		CloudinaryCloudName:    getEnvOrDefault("CLOUDINARY_CLOUD_NAME", ""),
+		CloudinaryAPIKey:       getEnvOrDefault("CLOUDINARY_API_KEY", ""),
+		CloudinaryAPISecret:    getEnvOrDefault("CLOUDINARY_API_SECRET", ""),
+		CloudinaryUploadFolder: getEnvOrDefault("CLOUDINARY_UPLOAD_FOLDER", "concert-go"),
+		LocalStoragePath:       getEnvOrDefault("LOCAL_STORAGE_PATH", "./public/uploads"),
 	}
 }
 

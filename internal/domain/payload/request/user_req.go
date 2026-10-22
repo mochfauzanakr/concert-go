@@ -23,6 +23,11 @@ type GetUserListRequest struct {
 type UpdateUserStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 }
+
+type UpdateProfileRequest struct {
+	Name string `form:"name" json:"name" binding:"omitempty,min=2,max=100"`
+}
+
 type AdminUpdateUserRequest struct {
 	Name   string `json:"name" binding:"required,min=2,max=100"`
 	RoleID int    `json:"roleId" binding:"required"`

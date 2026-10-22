@@ -16,14 +16,26 @@ import (
 	"github.com/google/uuid"
 )
 
+type mockStorageService struct {
+	uploadFunc func(ctx context.Context, fileHeader *multipart.FileHeader, folder string) (string, error)
+}
+
+func (m *mockStorageService) Upload(ctx context.Context, fileHeader *multipart.FileHeader, folder string) (string, error) {
+	if m.uploadFunc != nil {
+		return m.uploadFunc(ctx, fileHeader, folder)
+	}
+	return "https://res.cloudinary.com/demo/image/upload/sample.jpg", nil
+}
+
 func setupUserUsecase() (*usecase.UserUsecase, *mockEmailSender) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
 	emailSender := &mockEmailSender{}
+	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, storageService, cfg)
 	return uc, emailSender
 }
 
@@ -139,7 +151,7 @@ func TestUserUsecase_AcceptInvite(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
 
 	rawToken := "valid-secret-token-12345"
 	tokenHash := util.HashToken(rawToken)
@@ -238,7 +250,7 @@ func TestUserUsecase_ValidateInvite(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
 
 	rawToken := "valid-token-for-check"
 	tokenHash := util.HashToken(rawToken)
@@ -552,6 +564,66 @@ func TestUserUsecase_UpdateUserStatus(t *testing.T) {
 	})
 }
 
+func TestUserUsecase_UpdateProfile(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	emailSender := &mockEmailSender{}
+	storageService := &mockStorageService{}
+	cfg := &config.Config{}
+
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, storageService, cfg)
+
+	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       userID,
+		Name:     "Old Name",
+		Email:    "profile@example.com",
+		RoleID:   &buyerRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+
+	t.Run("user not found", func(t *testing.T) {
+		_, err := uc.UpdateProfile(ctx, uuid.New(), "New Name", nil)
+		if err == nil {
+			t.Fatal("expected error for non-existent user")
+		}
+	})
+
+	t.Run("invalid short name", func(t *testing.T) {
+		_, err := uc.UpdateProfile(ctx, userID, "A", nil)
+		if err == nil {
+			t.Fatal("expected error for name < 2 chars")
+		}
+	})
+
+	t.Run("success update name", func(t *testing.T) {
+		res, err := uc.UpdateProfile(ctx, userID, "Valid New Name", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Name != "Valid New Name" {
+			t.Errorf("expected name 'Valid New Name', got %s", res.Name)
+		}
+	})
+
+	t.Run("success update avatar with mock storage", func(t *testing.T) {
+		header := &multipart.FileHeader{
+			Filename: "avatar.png",
+			Size:     1024,
+		}
+		res, err := uc.UpdateProfile(ctx, userID, "", header)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.AvatarURL == nil || *res.AvatarURL == "" {
+			t.Errorf("expected avatarUrl to be set")
+		}
+	})
+}
 
 func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	ctx := context.Background()
