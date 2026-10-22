@@ -269,3 +269,68 @@ func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRe
 	}, nil
 }
 
+func (u *UserUsecase) UpdateUserStatus(
+	ctx context.Context,
+	actorID uuid.UUID,
+	actorRoleID *int,
+	targetUserID uuid.UUID,
+	req request.UpdateUserStatusRequest,
+) (*response.UserDetailResponse, error) {
+	if actorID == targetUserID {
+		return nil, exception.BadRequest("cannot change your own account status")
+	}
+
+	status := strings.ToUpper(strings.TrimSpace(req.Status))
+	if status != entity.UserStatusActive && status != entity.UserStatusSuspended {
+		return nil, exception.BadRequest("status must be ACTIVE or SUSPENDED")
+	}
+
+	actorRoleName := ""
+	if actorRoleID != nil && u.roleRepo != nil {
+		r, err := u.roleRepo.FindByID(ctx, *actorRoleID)
+		if err == nil && r != nil {
+			actorRoleName = r.Name
+		}
+	}
+
+	targetUser, err := u.userRepo.FindByID(ctx, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if targetUser == nil {
+		return nil, exception.NotFound("user not found")
+	}
+
+	targetRoleName := "UNKNOWN"
+	if targetUser.RoleID != nil && u.roleRepo != nil {
+		r, err := u.roleRepo.FindByID(ctx, *targetUser.RoleID)
+		if err == nil && r != nil {
+			targetRoleName = r.Name
+		}
+	}
+
+	if targetRoleName == "SUPER_ADMIN" {
+		return nil, exception.Forbidden("cannot change status of SUPER_ADMIN")
+	}
+
+	if actorRoleName == "ADMIN" && (targetRoleName == "ADMIN" || targetRoleName == "SUPER_ADMIN") {
+		return nil, exception.Forbidden("admins cannot change status of other admins or super admins")
+	}
+
+	targetUser.Status = status
+	if err := u.userRepo.Update(ctx, targetUser); err != nil {
+		return nil, err
+	}
+
+	return &response.UserDetailResponse{
+		ID:        targetUser.ID,
+		RoleID:    targetUser.RoleID,
+		Name:      targetUser.Name,
+		Email:     targetUser.Email,
+		AvatarURL: targetUser.AvatarURL,
+		Provider:  targetUser.Provider,
+		Status:    targetUser.Status,
+		CreatedAt: targetUser.CreatedAt,
+	}, nil
+}
+

@@ -130,3 +130,32 @@ func (h *UserHandler) GetAllUsers(c *gin.Context) {
 	util.RespondOK(c, "Users fetched successfully", res.Items, &res.Pagination)
 }
 
+func (h *UserHandler) UpdateUserStatus(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	idStr := c.Param("id")
+	targetID, err := uuid.Parse(idStr)
+	if err != nil {
+		util.RespondBadRequest(c, "Invalid user ID format", err.Error())
+		return
+	}
+
+	var req request.UpdateUserStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	user, err := h.userUsecase.UpdateUserStatus(c.Request.Context(), session.UserID, session.RoleID, targetID, req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "User status updated successfully", user, nil)
+}
+

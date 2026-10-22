@@ -236,6 +236,9 @@ func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshToken
 	if user == nil {
 		return nil, exception.NotFound("user not found")
 	}
+	if user.Status == entity.UserStatusSuspended {
+		return nil, exception.Forbidden("account is suspended")
+	}
 
 	// Revoke old session token
 	_ = u.sessionRepo.Revoke(ctx, tokenHash)

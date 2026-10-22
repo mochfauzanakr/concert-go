@@ -379,3 +379,128 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	})
 }
 
+func TestUserUsecase_UpdateUserStatus(t *testing.T) {
+	ctx := context.Background()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	emailSender := &mockEmailSender{}
+	cfg := &config.Config{}
+
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+
+	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
+	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
+	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+
+	superAdminID := uuid.New()
+	admin1ID := uuid.New()
+	admin2ID := uuid.New()
+	organizerID := uuid.New()
+
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       superAdminID,
+		Name:     "Super Admin",
+		Email:    "superadmin@example.com",
+		RoleID:   &superAdminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       admin1ID,
+		Name:     "Admin One",
+		Email:    "admin1@example.com",
+		RoleID:   &adminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       admin2ID,
+		Name:     "Admin Two",
+		Email:    "admin2@example.com",
+		RoleID:   &adminRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       organizerID,
+		Name:     "Event Organizer",
+		Email:    "org@example.com",
+		RoleID:   &organizerRole.ID,
+		Status:   entity.UserStatusActive,
+		Provider: "email",
+	})
+
+	t.Run("self-lockout rejected", func(t *testing.T) {
+		_, err := uc.UpdateUserStatus(ctx, admin1ID, &adminRole.ID, admin1ID, request.UpdateUserStatusRequest{
+			Status: entity.UserStatusSuspended,
+		})
+		if err == nil {
+			t.Fatal("expected error on self-lockout attempt")
+		}
+	})
+
+	t.Run("invalid status string", func(t *testing.T) {
+		_, err := uc.UpdateUserStatus(ctx, admin1ID, &adminRole.ID, organizerID, request.UpdateUserStatusRequest{
+			Status: "BANNED",
+		})
+		if err == nil {
+			t.Fatal("expected error on invalid status")
+		}
+	})
+
+	t.Run("cannot suspend SUPER_ADMIN", func(t *testing.T) {
+		_, err := uc.UpdateUserStatus(ctx, admin1ID, &adminRole.ID, superAdminID, request.UpdateUserStatusRequest{
+			Status: entity.UserStatusSuspended,
+		})
+		if err == nil {
+			t.Fatal("expected error when trying to suspend super admin")
+		}
+	})
+
+	t.Run("ADMIN cannot suspend another ADMIN", func(t *testing.T) {
+		_, err := uc.UpdateUserStatus(ctx, admin1ID, &adminRole.ID, admin2ID, request.UpdateUserStatusRequest{
+			Status: entity.UserStatusSuspended,
+		})
+		if err == nil {
+			t.Fatal("expected error when admin attempts to suspend another admin")
+		}
+	})
+
+	t.Run("SUPER_ADMIN can suspend ADMIN", func(t *testing.T) {
+		res, err := uc.UpdateUserStatus(ctx, superAdminID, &superAdminRole.ID, admin2ID, request.UpdateUserStatusRequest{
+			Status: entity.UserStatusSuspended,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Status != entity.UserStatusSuspended {
+			t.Errorf("expected status SUSPENDED, got %s", res.Status)
+		}
+	})
+
+	t.Run("ADMIN can suspend ORGANIZER", func(t *testing.T) {
+		res, err := uc.UpdateUserStatus(ctx, admin1ID, &adminRole.ID, organizerID, request.UpdateUserStatusRequest{
+			Status: entity.UserStatusSuspended,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Status != entity.UserStatusSuspended {
+			t.Errorf("expected status SUSPENDED, got %s", res.Status)
+		}
+	})
+
+	t.Run("Reactivate user back to ACTIVE", func(t *testing.T) {
+		res, err := uc.UpdateUserStatus(ctx, admin1ID, &adminRole.ID, organizerID, request.UpdateUserStatusRequest{
+			Status: entity.UserStatusActive,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Status != entity.UserStatusActive {
+			t.Errorf("expected status ACTIVE, got %s", res.Status)
+		}
+	})
+}
+
