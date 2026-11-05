@@ -96,7 +96,7 @@ func LoadConfig() *Config {
 		SMTPFrom:            getEnvOrDefault("SMTP_FROM", "no-reply@concertgo.com"),
 		GoogleClientID:      getEnvOrDefault("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret:  getEnvOrDefault("GOOGLE_CLIENT_SECRET", ""),
-		GoogleRedirectURL:   getEnvOrDefault("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/auth/google/callback"),
+		GoogleRedirectURL:   getEnvOrDefault("GOOGLE_REDIRECT_URL", "http://localhost:3100/auth/callback"),
 		CloudinaryCloudName:    getEnvOrDefault("CLOUDINARY_CLOUD_NAME", ""),
 		CloudinaryAPIKey:       getEnvOrDefault("CLOUDINARY_API_KEY", ""),
 		CloudinaryAPISecret:    getEnvOrDefault("CLOUDINARY_API_SECRET", ""),
