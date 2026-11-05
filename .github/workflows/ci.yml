@@ -2,9 +2,8 @@ name: Backend CI Checks
 
 on:
   push:
-    branches: [ "main", "dev/**" ]
   pull_request:
-    branches: [ "main", "dev/**" ]
+    branches: [ "main"]
 
 jobs:
   test-and-build:
