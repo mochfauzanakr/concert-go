@@ -1,27 +1,13 @@
 package routes
 
 import (
-	"concert-go/internal/config"
 	"concert-go/internal/handler"
 	"concert-go/internal/middleware"
-	"concert-go/internal/repository/postgres"
-	"concert-go/internal/repository/redis"
-	"concert-go/internal/usecase"
-	"concert-go/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
 
-func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
-	userRepo := postgres.NewUserRepository(config.SqlDB)
-	sessionRepo := postgres.NewSessionRepository(config.SqlDB)
-	otpRepo := redis.NewOTPRepository(config.RedisClient)
-	roleRepo := postgres.NewRoleRepository(config.SqlDB)
-	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
-
-	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
-	authHandler := handler.NewAuthHandler(authUsecase, cfg)
-
+func AuthRoute(router *gin.RouterGroup, authHandler *handler.AuthHandler, jwtSecret string) {
 	auth := router.Group("/auth")
 	auth.POST("/register", authHandler.Register)
 	auth.POST("/verify-otp", authHandler.VerifyOTP)
@@ -36,7 +22,7 @@ func AuthRoute(router *gin.RouterGroup, cfg *config.Config) {
 	auth.POST("/logout", authHandler.Logout)
 
 	protected := auth.Group("")
-	protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	protected.Use(middleware.AuthMiddleware(jwtSecret))
 	protected.GET("/me", authHandler.Me)
 	protected.POST("/change-password", authHandler.ChangePassword)
 }
