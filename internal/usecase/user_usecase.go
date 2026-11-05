@@ -460,17 +460,14 @@ func (u *UserUsecase) AdminUpdateUser(
 		return nil, exception.BadRequest("role not found")
 	}
 
-	// 1. Cannot change your own role
 	if actorID == targetUserID && actorRoleID != nil && *actorRoleID != req.RoleID {
 		return nil, exception.Forbidden("cannot change your own role")
 	}
 
-	// 2. ADMIN cannot edit SUPER_ADMIN or other ADMIN
 	if actorRoleName == "ADMIN" && (targetRoleName == "SUPER_ADMIN" || targetRoleName == "ADMIN") {
 		return nil, exception.Forbidden("admins cannot edit other admins or super admins")
 	}
 
-	// 3. Only SUPER_ADMIN can assign SUPER_ADMIN or ADMIN role
 	if newRole.Name == "SUPER_ADMIN" && actorRoleName != "SUPER_ADMIN" {
 		return nil, exception.Forbidden("only super admin can assign super admin role")
 	}
