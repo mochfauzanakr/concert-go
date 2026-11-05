@@ -114,15 +114,15 @@ func (u *UserUsecase) InviteUser(ctx context.Context, inviterID uuid.UUID, invit
 		ExpiresAt: expiresAt,
 	}
 
-	if err := u.inviteRepo.Create(ctx, invite); err != nil {
-		return nil, err
-	}
-
 	inviteURL := "/accept-invite?token=" + rawToken
 	if u.emailSender != nil {
 		if err := u.emailSender.SendInviteLink(email, targetRole.Name, inviteURL); err != nil {
 			return nil, exception.Internal("failed to send invitation email", err)
 		}
+	}
+
+	if err := u.inviteRepo.Create(ctx, invite); err != nil {
+		return nil, err
 	}
 
 	return &response.InviteResponse{
