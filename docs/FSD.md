@@ -79,7 +79,16 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 
 #### F-1.5 Me (Data Pengguna Login)
 - **Akses**: Pengguna Login (Bearer Token).
-- **Output**: ID, nama, email, role, permissions, dan metadata sesi.
+- **Output**: ID, nama, email, role, avatarUrl, permissions, dan metadata sesi.
+
+#### F-1.6 Edit Profile (Self)
+- **Akses**: Pengguna Login (Semua Role).
+- **Endpoint**: `PUT /api/users/me`.
+- **Content-Type**: `multipart/form-data` atau `application/json`.
+- **Input**:
+  - `name`: string (opsional, min 2, max 100).
+  - `avatar`: file gambar (opsional, tipe: `.jpg`, `.jpeg`, `.png`, `.webp`, ukuran maksimal 2 MB).
+- **Penyimpanan Gambar**: Auto-fallback (unggah ke Cloudinary jika API key tersedia di konfigurasi, fallback ke local storage server jika belum diset).
 
 ---
 
@@ -117,19 +126,66 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
   - Jika valid, akun diaktifkan dengan role yang telah ditentukan saat diundang.
   - Token invite ditandai sebagai `ACCEPTED` (tidak bisa digunakan ulang).
 
-#### F-2.4 User Detail & Suspend
+#### F-2.4 User Detail & Status Management (Suspend / Reactivate)
 - **Akses**: `SUPER_ADMIN` dan `ADMIN`.
-- **Fitur**: Melihat riwayat aktivitas akun dan menonaktifkan akun yang melanggar aturan.
+- **Endpoint**:
+  - `GET /api/users/:id` (Detail Pengguna)
+  - `PATCH /api/users/:id/status` (Ubah Status Pengguna)
+- **Input PATCH**:
+  ```json
+  {
+    "status": "SUSPENDED" // Nilai valid: "ACTIVE", "SUSPENDED"
+  }
+  ```
+- **Aturan Bisnis**:
+  - Tidak dapat mengubah status akun diri sendiri (*self-lockout prevention*).
+  - Role `SUPER_ADMIN` tidak dapat di-suspend oleh siapapun.
+  - Role `ADMIN` tidak dapat men-suspend `SUPER_ADMIN` maupun sesama `ADMIN`.
+  - Ketika akun di-suspend, seluruh sesi aktif dibatalkan dan pengguna langsung ditolak saat mencoba login atau refresh token.
+
+#### F-2.5 Admin Edit User
+- **Akses**: `SUPER_ADMIN` dan `ADMIN`.
+- **Endpoint**: `PUT /api/users/:id`.
+- **Input**:
+  ```json
+  {
+    "name": "Updated Name",
+    "roleId": 3
+  }
+  ```
+- **Aturan Bisnis**:
+  - `ADMIN` tidak dapat mengubah data maupun role sesama `ADMIN` atau `SUPER_ADMIN`.
+  - Pengguna tidak dapat mengubah rolenya sendiri menjadi lebih rendah (*anti-self-demotion*).
+  - Role baru yang dipilih wajib terdaftar di database.
 
 ---
 
 ### FD-3.0: Organizer Management
 
-#### F-3.1 Organizer Profile Setup
+#### F-3.1 Organizer Profile Setup & Management
 - **Akses**: `ORGANIZER` (setelah aktivasi akun via invite).
-- **Input**: `orgName`, `description`, `logoUrl`, kontak organisasi.
-- **Status**: Siap membuat event setelah profil terisi.
+- **Endpoint**:
+  - `GET /api/organizers/profile`: Mendapatkan data profil organisasi dari organizer yang sedang login (termasuk email dari akun `users`).
+  - `PUT /api/organizers/profile`: Membuat atau memperbarui profil organisasi.
+- **Content-Type**: `multipart/form-data` atau `application/json`.
+- **Input**:
+  - `orgName`: string (wajib, min 3, max 100).
+  - `description`: string (opsional).
+  - `phone`: string (opsional, min 8, max 20).
+  - `socialMedia`: string (opsional, URL website / akun media sosial).
+  - `logo`: file gambar (opsional, tipe: `.jpg`, `.jpeg`, `.png`, `.webp`, ukuran maksimal 2 MB).
+- **Penyimpanan Gambar**: Diunggah via `StorageService` (Cloudinary jika terkonfigurasi, fallback ke local storage), URL disimpan pada kolom `logo_url`.
+- **Aturan Bisnis**:
+  - Email kontak resmi organisasi otomatis merujuk ke `users.email` akun organizer yang bersangkutan (tidak ada duplikasi kolom email di tabel `organizer_profiles`).
+  - Tidak memerlukan persetujuan lanjutan admin (*no verification gate* / `verification_status` ditiadakan) karena kredensial organizer sudah terverifikasi saat diundang oleh `SUPER_ADMIN` atau `ADMIN`.
+  - Profil organisasi wajib dilengkapi sebagai prasyarat utama sebelum diizinkan membuat event.
 
-#### F-3.2 Event Staff Management
+#### F-3.2 Staff Management (Organizer-scoped)
 - **Akses**: `ORGANIZER`.
-- **Fitur**: Mengundang staf (`STAFF`) per-event untuk bertugas sebagai checker gerbang (gate ticket scanning).
+- **Prinsip**: Terisolasi per-organizer. Organizer hanya dapat mengundang, melihat, dan mengelola staf yang mereka rekrut sendiri melalui tautan undangan.
+- **Mekanisme Pelacakan**: Staf terasosiasi ke organizer melalui riwayat undangan di tabel `invites` (`invites.invited_by = current_organizer_id` dan `status = 'ACCEPTED'`).
+- **Endpoint**:
+  - `POST /api/users/invite`: Mengundang staf baru dengan role `STAFF` via email (mengikuti F-2.2).
+  - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan query parameters: `page`, `pageSize`, `search`).
+- **Catatan Modul Event (FD-4.0)**:
+  - Penugasan staf ke gerbang event tertentu (`GET /api/events/:eventId/staff` dan `POST /api/events/:eventId/staff/assign`) akan didefinisikan dan diimplementasikan secara terintegrasi pada modul Event Management.

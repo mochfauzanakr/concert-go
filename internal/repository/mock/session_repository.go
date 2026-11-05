@@ -56,3 +56,16 @@ func (m *sessionRepositoryMock) Revoke(ctx context.Context, tokenHash string) er
 	}
 	return nil
 }
+
+func (m *sessionRepositoryMock) RevokeByUserID(ctx context.Context, userID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	for _, s := range m.sessions {
+		if s.UserID == userID && s.RevokedAt == nil {
+			s.RevokedAt = &now
+		}
+	}
+	return nil
+}

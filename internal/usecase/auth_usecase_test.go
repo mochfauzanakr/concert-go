@@ -30,6 +30,10 @@ func (m *mockEmailSender) SendPasswordResetOTP(to, otp string) error {
 	return nil
 }
 
+func (m *mockEmailSender) SendInviteLink(to, role, inviteURL string) error {
+	return nil
+}
+
 func setupAuthUsecase() (*usecase.AuthUsecase, repository.OTPRepository) {
 	userRepo := mock.NewUserRepositoryMock()
 	sessionRepo := mock.NewSessionRepositoryMock()
@@ -378,6 +382,10 @@ func (m *mockFailingEmailSender) SendRegistrationOTP(to, name, otp string) error
 }
 
 func (m *mockFailingEmailSender) SendPasswordResetOTP(to, otp string) error {
+	return errors.New("smtp connection refused")
+}
+
+func (m *mockFailingEmailSender) SendInviteLink(to, role, inviteURL string) error {
 	return errors.New("smtp connection refused")
 }
 

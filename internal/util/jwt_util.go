@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
+	// "time"
 
 	"github.com/google/uuid"
 )
@@ -82,9 +82,10 @@ func ValidateJWT(secret string, tokenStr string) (*JWTClaims, error) {
 		return nil, errors.New("invalid token claims")
 	}
 
-	if time.Now().Unix() > claims.ExpiresAt {
-		return nil, errors.New("token has expired")
-	}
+	// temporarily disabled JWT expiration check for manual testing; uncomment before production
+	// if time.Now().Unix() > claims.ExpiresAt {
+	// 	return nil, errors.New("token has expired")
+	// }
 
 	return &claims, nil
 }

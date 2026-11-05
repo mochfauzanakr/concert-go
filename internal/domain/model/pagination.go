@@ -1,25 +1,59 @@
 package model
 
-import "math"
-
-// Pagination represents internal domain pagination data & helpers
+// Pagination represents standard domain pagination metadata
 type Pagination struct {
-	Page  int `json:"page"`
-	Limit int `json:"limit"`
+	TotalRecords int  `json:"totalRecords"`
+	CurrentPage  int  `json:"currentPage"`
+	TotalPage    int  `json:"totalPage"`
+	NextPage     *int `json:"nextPage"`
+	PrevPage     *int `json:"prevPage"`
 }
 
-// Offset returns the SQL query offset
-func (p Pagination) Offset() int {
-	if p.Page <= 0 {
-		return 0
+// BuildPagination constructs a Pagination model from total records, page, and page size
+func BuildPagination(totalRecords, page, pageSize int) Pagination {
+	if page <= 0 {
+		page = 1
 	}
-	return (p.Page - 1) * p.Limit
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	totalPage := 0
+	if totalRecords > 0 {
+		totalPage = (totalRecords + pageSize - 1) / pageSize
+	}
+
+	var nextPage *int
+	if page < totalPage {
+		n := page + 1
+		nextPage = &n
+	}
+
+	var prevPage *int
+	if page > 1 && (totalPage == 0 || page <= totalPage+1) {
+		p := page - 1
+		prevPage = &p
+	}
+
+	return Pagination{
+		TotalRecords: totalRecords,
+		CurrentPage:  page,
+		TotalPage:    totalPage,
+		NextPage:     nextPage,
+		PrevPage:     prevPage,
+	}
 }
 
-// TotalPages calculates total page count
-func (p Pagination) TotalPages(totalRecords int) int {
-	if p.Limit <= 0 {
-		return 0
+// CalculateOffset returns the SQL offset for a given page and page size
+func CalculateOffset(page, pageSize int) int {
+	if page <= 0 {
+		page = 1
 	}
-	return int(math.Ceil(float64(totalRecords) / float64(p.Limit)))
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	return (page - 1) * pageSize
 }

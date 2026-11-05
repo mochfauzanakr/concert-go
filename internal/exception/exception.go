@@ -39,6 +39,13 @@ func Unauthorized(message string) *AppException {
 	}
 }
 
+func Forbidden(message string) *AppException {
+	return &AppException{
+		Code:    http.StatusForbidden,
+		Message: message,
+	}
+}
+
 func NotFound(message string) *AppException {
 	return &AppException{
 		Code:    http.StatusNotFound,

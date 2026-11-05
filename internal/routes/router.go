@@ -15,11 +15,16 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.RecoveryMiddleware())
 
+	if cfg.LocalStoragePath != "" {
+		r.Static("/uploads", cfg.LocalStoragePath)
+	}
+
 	api := r.Group("/api")
 	{
 		HelloRoute(api)
 		AuthRoute(api, cfg)
 		RoleRoute(api)
+		UserRoute(api, cfg)
 
 		// TODO: delete it in when it goes to main
 		DevRoute(api, cfg)

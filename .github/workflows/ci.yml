@@ -2,9 +2,8 @@ name: Backend CI Checks
 
 on:
   push:
-    branches: [ "main", "development" ]
   pull_request:
-    branches: [ "main", "development" ]
+    branches: [ "main"]
 
 jobs:
   test-and-build:
@@ -17,7 +16,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          go-version-file: 'go.mod'
           cache: true
 
       - name: Verify Dependencies

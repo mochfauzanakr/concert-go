@@ -11,6 +11,7 @@ type UserResponse struct {
 	RoleID    *int      `json:"roleId,omitempty"`
 	Name      string    `json:"name"`
 	Email     string    `json:"email"`
+	AvatarURL *string   `json:"avatarUrl,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 

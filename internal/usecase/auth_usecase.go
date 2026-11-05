@@ -26,7 +26,6 @@ type AuthUsecase struct {
 	cfg         *config.Config
 }
 
-// NewAuthUsecase constructor
 func NewAuthUsecase(
 	userRepo repository.UserRepository,
 	sessionRepo repository.SessionRepository,
@@ -103,6 +102,10 @@ func (u *AuthUsecase) Login(ctx context.Context, req request.LoginRequest, ipAdd
 
 	if user.PasswordHash == nil || !util.CheckPassword(req.Password, *user.PasswordHash) {
 		return nil, exception.Unauthorized("invalid email or password")
+	}
+
+	if user.Status == entity.UserStatusSuspended {
+		return nil, exception.Forbidden("account is suspended, please contact administrator")
 	}
 
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
@@ -201,6 +204,10 @@ func (u *AuthUsecase) OAuthLogin(ctx context.Context, email, name, provider, pro
 		}
 	}
 
+	if user.Status == entity.UserStatusSuspended {
+		return nil, exception.Forbidden("account is suspended, please contact administrator")
+	}
+
 	tokens, err := u.generateAndSaveTokens(ctx, user, ipAddress, userAgent)
 	if err != nil {
 		return nil, err
@@ -228,6 +235,9 @@ func (u *AuthUsecase) RefreshToken(ctx context.Context, req request.RefreshToken
 	}
 	if user == nil {
 		return nil, exception.NotFound("user not found")
+	}
+	if user.Status == entity.UserStatusSuspended {
+		return nil, exception.Forbidden("account is suspended")
 	}
 
 	// Revoke old session token
@@ -418,6 +428,7 @@ func toUserResponse(user *entity.User) response.UserResponse {
 		RoleID:    user.RoleID,
 		Name:      user.Name,
 		Email:     user.Email,
+		AvatarURL: user.AvatarURL,
 		CreatedAt: user.CreatedAt,
 	}
 }
