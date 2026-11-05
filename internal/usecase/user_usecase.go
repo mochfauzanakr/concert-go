@@ -114,7 +114,11 @@ func (u *UserUsecase) InviteUser(ctx context.Context, inviterID uuid.UUID, invit
 		ExpiresAt: expiresAt,
 	}
 
-	inviteURL := "/accept-invite?token=" + rawToken
+	baseURL := "http://localhost:3100"
+	if u.cfg != nil && strings.TrimSpace(u.cfg.FrontendURL) != "" {
+		baseURL = strings.TrimRight(strings.TrimSpace(u.cfg.FrontendURL), "/")
+	}
+	inviteURL := baseURL + "/accept-invite?token=" + rawToken
 	if u.emailSender != nil {
 		if err := u.emailSender.SendInviteLink(email, targetRole.Name, inviteURL); err != nil {
 			return nil, exception.Internal("failed to send invitation email", err)

@@ -39,6 +39,7 @@ type Config struct {
 	CloudinaryAPISecret    string
 	CloudinaryUploadFolder string
 	LocalStoragePath       string
+	FrontendURL            string
 }
 
 // LoadConfig reads the .env file and sets up the configuration
@@ -102,6 +103,7 @@ func LoadConfig() *Config {
 		CloudinaryAPISecret:    getEnvOrDefault("CLOUDINARY_API_SECRET", ""),
 		CloudinaryUploadFolder: getEnvOrDefault("CLOUDINARY_UPLOAD_FOLDER", "concert-go"),
 		LocalStoragePath:       getEnvOrDefault("LOCAL_STORAGE_PATH", "./public/uploads"),
+		FrontendURL:            getEnvOrDefault("FRONTEND_URL", "http://localhost:3100"),
 	}
 }
 
