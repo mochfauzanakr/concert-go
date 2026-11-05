@@ -33,4 +33,7 @@ app.dev.yaml
 
 rule.md
 
+public/uploads/*
+!public/uploads/.gitkeep
+
 audit
