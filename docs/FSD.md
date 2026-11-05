@@ -163,12 +163,15 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 ### FD-3.0: Organizer Management
 
 #### F-3.1 Organizer Profile Setup & Management
-- **Akses**: `ORGANIZER` (setelah aktivasi akun via invite).
+- **Akses**:
+  - `GET /api/organizers/profile` & `PUT /api/organizers/profile`: `ORGANIZER` (setelah aktivasi akun via invite).
+  - `GET /api/organizers/:id`: Publik (dapat diakses oleh `BUYER` / pengunjung untuk melihat profil promotor penyelenggara event).
 - **Endpoint**:
   - `GET /api/organizers/profile`: Mendapatkan data profil organisasi dari organizer yang sedang login (termasuk email dari akun `users`).
   - `PUT /api/organizers/profile`: Membuat atau memperbarui profil organisasi.
-- **Content-Type**: `multipart/form-data` atau `application/json`.
-- **Input**:
+  - `GET /api/organizers/:id`: Mendapatkan informasi publik profil organizer berdasarkan ID profil / user organizer.
+- **Content-Type (`PUT /api/organizers/profile`)**: `multipart/form-data` atau `application/json`.
+- **Input (`PUT /api/organizers/profile`)**:
   - `orgName`: string (wajib, min 3, max 100).
   - `description`: string (opsional).
   - `phone`: string (opsional, min 8, max 20).
@@ -182,10 +185,85 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 
 #### F-3.2 Staff Management (Organizer-scoped)
 - **Akses**: `ORGANIZER`.
-- **Prinsip**: Terisolasi per-organizer. Organizer hanya dapat mengundang, melihat, dan mengelola staf yang mereka rekrut sendiri melalui tautan undangan.
+- **Prinsip**: Terisolasi per-organizer. Organizer hanya dapat mengundang, melihat, dan mengelola status staf yang mereka rekrut sendiri melalui tautan undangan.
 - **Mekanisme Pelacakan**: Staf terasosiasi ke organizer melalui riwayat undangan di tabel `invites` (`invites.invited_by = current_organizer_id` dan `status = 'ACCEPTED'`).
 - **Endpoint**:
   - `POST /api/users/invite`: Mengundang staf baru dengan role `STAFF` via email (mengikuti F-2.2).
-  - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan query parameters: `page`, `pageSize`, `search`).
+  - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan query parameters: `page`, `pageSize`, `search`, `status`).
+  - `PATCH /api/organizers/staff/:id/status`: Mengubah status akun staf (`ACTIVE` / `SUSPENDED`) milik organizer yang sedang login.
+- **Input PATCH (`/api/organizers/staff/:id/status`)**:
+  ```json
+  {
+    "status": "SUSPENDED" // Nilai valid: "ACTIVE", "SUSPENDED"
+  }
+  ```
+- **Aturan Bisnis Status Staf**:
+  - Organizer hanya berhak mengubah status user dengan role `STAFF` yang memiliki catatan undangan `invites.invited_by = organizer_user_id`. Jika staf tersebut milik organizer lain, tolak dengan `403 Forbidden` / `404 Not Found`.
+  - Ketika staf di-suspend (`SUSPENDED`), seluruh sesi aktif staf tersebut di tabel `sessions` otomatis dicabut (*revoked*).
 - **Catatan Modul Event (FD-4.0)**:
-  - Penugasan staf ke gerbang event tertentu (`GET /api/events/:eventId/staff` dan `POST /api/events/:eventId/staff/assign`) akan didefinisikan dan diimplementasikan secara terintegrasi pada modul Event Management.
+  - Penugasan staf dan co-organizer ke event tertentu (`event_organizers`) didefinisikan pada modul Event Management (FD-4.0).
+
+---
+
+### FD-4.0: Event, Lineup, & Team Management
+
+*(Catatan: Pengelolaan jenis tiket, gelombang harga, dan alokasi kuota `ONLINE`/`OFFLINE` dipisahkan ke modul **FD-5.0: Ticket, Pricing & Inventory Management**).*
+
+#### F-4.1 Public Event Catalog & Detail
+- **Akses**: Publik (Semua pengunjung / `BUYER`).
+- **Endpoint**:
+  - `GET /api/events`: Daftar seluruh event dengan status `PUBLISHED`.
+    - **Query Parameters**: `page`, `pageSize`, `search` (nama event / artis), `city`, `category`, `startDate`, `endDate`, `sortBy`.
+  - `GET /api/events/:id`: Detail informasi lengkap suatu event (mencakup deskripsi, waktu, lokasi, kota, kategori, banner, info Lead Organizer, daftar Co-Organizer, daftar Lineup Artis, serta ringkasan ketersediaan tiket).
+
+#### F-4.2 Event Creation, Update, & Status Lifecycle (Organizer)
+- **Akses**: `ORGANIZER`.
+- **Prasyarat Wajib**: Akun `ORGANIZER` wajib telah melengkapi `organizer_profiles` (F-3.1). Jika belum memiliki profil organisasi, pembuatan event ditolak dengan `422 Unprocessable Entity`.
+- **Endpoint**:
+  - `GET /api/organizers/events`: Daftar seluruh event yang dikelola oleh organizer yang sedang login (baik sebagai Lead Organizer maupun Co-Organizer, mencakup semua status: `DRAFT`, `PUBLISHED`, `COMPLETED`, `CANCELLED`).
+  - `POST /api/events`: Membuat event baru (status awal otomatis `DRAFT`).
+  - `PUT /api/events/:id`: Memperbarui data dan banner event (Hanya **Lead Organizer** pemilik `events.organizer_id`).
+  - `PATCH /api/events/:id/status`: Mengubah status siklus hidup event (`DRAFT`, `PUBLISHED`, `COMPLETED`, `CANCELLED`) tanpa perlu persetujuan Admin.
+- **Content-Type (`POST` & `PUT /api/events`)**: `multipart/form-data` atau `application/json`.
+- **Input Event**:
+  - `name`: string (wajib, min 3, max 150).
+  - `description`: string (wajib).
+  - `category`: string (wajib, contoh: `Festival`, `Rock`, `Pop`, `Jazz`, `Indie`).
+  - `city`: string (wajib, contoh: `Jakarta`, `Bandung`, `Surabaya`).
+  - `location`: string (wajib, nama venue / alamat lengkap).
+  - `startTime`: timestamp ISO-8601 (wajib).
+  - `endTime`: timestamp ISO-8601 (wajib, harus setelah `startTime`).
+  - `inventoryMode`: string (wajib: `ONLINE_ONLY` atau `DUAL_CHANNEL` untuk penjualan gabungan online & offline/on-the-spot).
+  - `banner`: file gambar (opsional, `.jpg`, `.jpeg`, `.png`, `.webp`, maks 2 MB, disimpan via `StorageService` ke folder `banners` dan URL disimpan di kolom `banner_url`).
+
+#### F-4.3 Artist & Lineup Management
+- **Akses**:
+  - `GET /api/artists`: Publik / Semua Role.
+  - Mutasi (`POST` & `DELETE`): `ORGANIZER` (Lead Organizer pada event terkait) dan `ADMIN`/`SUPER_ADMIN`.
+- **Endpoint**:
+  - `GET /api/artists`: Daftar master data artis (dengan pagination & `search`).
+  - `POST /api/artists`: Menambahkan profil artis baru ke master data (`name`, `bio`, serta opsional foto `avatar` via `StorageService`).
+  - `POST /api/events/:eventId/artists`: Menambahkan artis ke dalam lineup suatu event (`artistId`).
+  - `DELETE /api/events/:eventId/artists/:artistId`: Menghapus artis dari lineup event.
+
+#### F-4.4 Event Team Management (Co-Organizer & Gate Staff)
+- **Akses**: `ORGANIZER` (Hanya **Lead Organizer** dari event terkait).
+- **Prinsip**:
+  - Penugasan bersifat langsung aktif (`assigned_at`) tanpa memerlukan konfirmasi penerimaan ulang.
+  - `CO_ORGANIZER` dicantumkan sebagai mitra penyelenggara pada event dan dapat melihat event di dashboard mereka, sedangkan kendali penuh pengaturan event dan tiket tetap dipegang oleh Lead Organizer (`events.organizer_id`).
+  - `STAFF` ditugaskan khusus ke event terkait untuk wewenang pemindaian & validasi QR tiket di gerbang masuk.
+- **Endpoint**:
+  - `GET /api/events/:eventId/team`: Daftar seluruh anggota tim (`CO_ORGANIZER` dan `STAFF`) yang ditugaskan pada event tersebut.
+  - `POST /api/events/:eventId/team`: Menugaskan pengguna ke dalam tim event.
+    - **Input**:
+      ```json
+      {
+        "userId": "uuid-user",
+        "roleInEvent": "STAFF" // Nilai valid: "CO_ORGANIZER", "STAFF"
+      }
+      ```
+    - **Aturan Bisnis**:
+      - Jika `roleInEvent == "STAFF"`: Pengguna target wajib memiliki role `STAFF`, berstatus `ACTIVE`, dan merupakan staf yang direkrut oleh Lead Organizer tersebut (`invites.invited_by = lead_organizer_id`).
+      - Jika `roleInEvent == "CO_ORGANIZER"`: Pengguna target wajib memiliki role `ORGANIZER`, berstatus `ACTIVE`, dan bukan merupakan Lead Organizer itu sendiri.
+      - Tolak dengan `409 Conflict` jika pengguna sudah terdaftar di tim event tersebut.
+  - `DELETE /api/events/:eventId/team/:userId`: Mencopot (unassign) `CO_ORGANIZER` atau `STAFF` dari event tersebut.
