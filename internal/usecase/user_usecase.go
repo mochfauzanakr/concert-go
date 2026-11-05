@@ -459,9 +459,12 @@ func (u *UserUsecase) AdminUpdateUser(
 		return nil, exception.Forbidden("admins cannot edit other admins or super admins")
 	}
 
-	// 3. Only SUPER_ADMIN can assign SUPER_ADMIN role
+	// 3. Only SUPER_ADMIN can assign SUPER_ADMIN or ADMIN role
 	if newRole.Name == "SUPER_ADMIN" && actorRoleName != "SUPER_ADMIN" {
 		return nil, exception.Forbidden("only super admin can assign super admin role")
+	}
+	if actorRoleName == "ADMIN" && newRole.Name == "ADMIN" {
+		return nil, exception.Forbidden("admins cannot assign admin role")
 	}
 	if targetRoleName == "SUPER_ADMIN" && actorRoleName != "SUPER_ADMIN" {
 		return nil, exception.Forbidden("cannot edit super admin")

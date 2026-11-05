@@ -708,6 +708,16 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 		}
 	})
 
+	t.Run("ADMIN cannot promote to ADMIN", func(t *testing.T) {
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+			Name:   "Buyer Promoted To Admin",
+			RoleID: adminRole.ID,
+		})
+		if err == nil {
+			t.Fatal("expected error when admin attempts to promote to admin")
+		}
+	})
+
 	t.Run("ADMIN can update BUYER to ORGANIZER", func(t *testing.T) {
 		res, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
 			Name:   "Buyer To Organizer",
