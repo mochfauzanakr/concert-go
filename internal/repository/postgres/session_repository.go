@@ -88,3 +88,13 @@ func (r *sessionRepositoryImpl) Revoke(ctx context.Context, tokenHash string) er
 	_, err := r.db.ExecContext(ctx, query, time.Now(), tokenHash)
 	return err
 }
+
+func (r *sessionRepositoryImpl) RevokeByUserID(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE sessions
+		SET revoked_at = $1
+		WHERE user_id = $2 AND revoked_at IS NULL
+	`
+	_, err := r.db.ExecContext(ctx, query, time.Now(), userID)
+	return err
+}

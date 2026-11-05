@@ -31,11 +31,12 @@ func setupUserUsecase() (*usecase.UserUsecase, *mockEmailSender) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	sessionRepo := mock.NewSessionRepositoryMock()
 	emailSender := &mockEmailSender{}
 	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, storageService, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, emailSender, storageService, cfg)
 	return uc, emailSender
 }
 
@@ -151,7 +152,7 @@ func TestUserUsecase_AcceptInvite(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	rawToken := "valid-secret-token-12345"
 	tokenHash := util.HashToken(rawToken)
@@ -250,7 +251,7 @@ func TestUserUsecase_ValidateInvite(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	rawToken := "valid-token-for-check"
 	tokenHash := util.HashToken(rawToken)
@@ -302,7 +303,7 @@ func TestUserUsecase_GetUserDetail(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	userID := uuid.New()
@@ -350,7 +351,7 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
 	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
@@ -447,7 +448,7 @@ func TestUserUsecase_UpdateUserStatus(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
@@ -573,7 +574,7 @@ func TestUserUsecase_UpdateProfile(t *testing.T) {
 	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, storageService, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, storageService, cfg)
 
 	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
 	userID := uuid.New()
@@ -633,7 +634,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")

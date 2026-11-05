@@ -15,10 +15,11 @@ func UserRoute(router *gin.RouterGroup, cfg *config.Config) {
 	userRepo := postgres.NewUserRepository(config.SqlDB)
 	roleRepo := postgres.NewRoleRepository(config.SqlDB)
 	inviteRepo := postgres.NewInviteRepository(config.SqlDB)
+	sessionRepo := postgres.NewSessionRepository(config.SqlDB)
 	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
 	storageService := util.NewStorageService(cfg)
 
-	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, emailSender, storageService, cfg)
+	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, emailSender, storageService, cfg)
 	userHandler := handler.NewUserHandler(userUsecase)
 
 	users := router.Group("/users")

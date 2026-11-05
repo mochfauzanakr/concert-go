@@ -22,6 +22,7 @@ type UserUsecase struct {
 	userRepo       repository.UserRepository
 	roleRepo       repository.RoleRepository
 	inviteRepo     repository.InviteRepository
+	sessionRepo    repository.SessionRepository
 	emailSender    util.EmailSender
 	storageService util.StorageService
 	cfg            *config.Config
@@ -31,6 +32,7 @@ func NewUserUsecase(
 	userRepo repository.UserRepository,
 	roleRepo repository.RoleRepository,
 	inviteRepo repository.InviteRepository,
+	sessionRepo repository.SessionRepository,
 	emailSender util.EmailSender,
 	storageService util.StorageService,
 	cfg *config.Config,
@@ -39,6 +41,7 @@ func NewUserUsecase(
 		userRepo:       userRepo,
 		roleRepo:       roleRepo,
 		inviteRepo:     inviteRepo,
+		sessionRepo:    sessionRepo,
 		emailSender:    emailSender,
 		storageService: storageService,
 		cfg:            cfg,
@@ -349,6 +352,10 @@ func (u *UserUsecase) UpdateUserStatus(
 	targetUser.Status = status
 	if err := u.userRepo.Update(ctx, targetUser); err != nil {
 		return nil, err
+	}
+
+	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
+		_ = u.sessionRepo.RevokeByUserID(ctx, targetUserID)
 	}
 
 	return &response.UserDetailResponse{
