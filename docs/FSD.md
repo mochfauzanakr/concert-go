@@ -162,15 +162,30 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 
 ### FD-3.0: Organizer Management
 
-#### F-3.1 Organizer Profile Setup
+#### F-3.1 Organizer Profile Setup & Management
 - **Akses**: `ORGANIZER` (setelah aktivasi akun via invite).
-- **Input**: `orgName`, `description`, `logoUrl`, kontak organisasi.
-- **Status**: Siap membuat event setelah profil terisi.
-
-#### F-3.2 Event Staff Management
-- **Akses**: `ORGANIZER`.
-- **Prinsip**: Terisolasi per-organizer (organizer hanya melihat dan mengelola staf mereka sendiri, terpisah dari `GET /api/users` platform).
 - **Endpoint**:
-  - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan pagination & search).
-  - `GET /api/events/:eventId/staff`: Daftar staf yang ditugaskan khusus pada suatu event untuk gerbang scan tiket.
-  - `POST /api/events/:eventId/staff/assign`: Menugaskan staf ke gerbang event tertentu.
+  - `GET /api/organizers/profile`: Mendapatkan data profil organisasi dari organizer yang sedang login (termasuk email dari akun `users`).
+  - `PUT /api/organizers/profile`: Membuat atau memperbarui profil organisasi.
+- **Content-Type**: `multipart/form-data` atau `application/json`.
+- **Input**:
+  - `orgName`: string (wajib, min 3, max 100).
+  - `description`: string (opsional).
+  - `phone`: string (opsional, min 8, max 20).
+  - `socialMedia`: string (opsional, URL website / akun media sosial).
+  - `logo`: file gambar (opsional, tipe: `.jpg`, `.jpeg`, `.png`, `.webp`, ukuran maksimal 2 MB).
+- **Penyimpanan Gambar**: Diunggah via `StorageService` (Cloudinary jika terkonfigurasi, fallback ke local storage), URL disimpan pada kolom `logo_url`.
+- **Aturan Bisnis**:
+  - Email kontak resmi organisasi otomatis merujuk ke `users.email` akun organizer yang bersangkutan (tidak ada duplikasi kolom email di tabel `organizer_profiles`).
+  - Tidak memerlukan persetujuan lanjutan admin (*no verification gate* / `verification_status` ditiadakan) karena kredensial organizer sudah terverifikasi saat diundang oleh `SUPER_ADMIN` atau `ADMIN`.
+  - Profil organisasi wajib dilengkapi sebagai prasyarat utama sebelum diizinkan membuat event.
+
+#### F-3.2 Staff Management (Organizer-scoped)
+- **Akses**: `ORGANIZER`.
+- **Prinsip**: Terisolasi per-organizer. Organizer hanya dapat mengundang, melihat, dan mengelola staf yang mereka rekrut sendiri melalui tautan undangan.
+- **Mekanisme Pelacakan**: Staf terasosiasi ke organizer melalui riwayat undangan di tabel `invites` (`invites.invited_by = current_organizer_id` dan `status = 'ACCEPTED'`).
+- **Endpoint**:
+  - `POST /api/users/invite`: Mengundang staf baru dengan role `STAFF` via email (mengikuti F-2.2).
+  - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan query parameters: `page`, `pageSize`, `search`).
+- **Catatan Modul Event (FD-4.0)**:
+  - Penugasan staf ke gerbang event tertentu (`GET /api/events/:eventId/staff` dan `POST /api/events/:eventId/staff/assign`) akan didefinisikan dan diimplementasikan secara terintegrasi pada modul Event Management.
