@@ -428,6 +428,7 @@ func toUserResponse(user *entity.User) response.UserResponse {
 		RoleID:    user.RoleID,
 		Name:      user.Name,
 		Email:     user.Email,
+		AvatarURL: user.AvatarURL,
 		CreatedAt: user.CreatedAt,
 	}
 }
