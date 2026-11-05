@@ -95,16 +95,39 @@ func (u *OrganizerUsecase) UpsertProfile(
 		return nil, err
 	}
 
+	return toOrganizerProfileResponse(profile, user.Email), nil
+}
+
+func (u *OrganizerUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*response.OrganizerProfileResponse, error) {
+	user, err := u.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, exception.NotFound("organizer user not found")
+	}
+
+	profile, err := u.organizerRepo.FindByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
+		return nil, exception.NotFound("organizer profile not found")
+	}
+
+	return toOrganizerProfileResponse(profile, user.Email), nil
+}
+func toOrganizerProfileResponse(profile *entity.OrganizerProfile, email string) *response.OrganizerProfileResponse {
 	return &response.OrganizerProfileResponse{
 		ID:          profile.ID,
 		UserID:      profile.UserID,
 		OrgName:     profile.OrgName,
-		Email:       user.Email,
+		Email:       email,
 		LogoURL:     profile.LogoURL,
 		Description: profile.Description,
 		Phone:       profile.Phone,
 		SocialMedia: profile.SocialMedia,
 		CreatedAt:   profile.CreatedAt,
 		UpdatedAt:   profile.UpdatedAt,
-	}, nil
+	}
 }

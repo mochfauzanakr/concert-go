@@ -33,6 +33,23 @@ func (m *organizerRepositoryMock) FindByUserID(ctx context.Context, userID uuid.
 	return nil, nil
 }
 
+func (m *organizerRepositoryMock) FindByIDOrUserID(ctx context.Context, id uuid.UUID) (*entity.OrganizerProfile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if p, exists := m.profiles[id]; exists {
+		copyProfile := *p
+		return &copyProfile, nil
+	}
+	for _, p := range m.profiles {
+		if p.ID == id {
+			copyProfile := *p
+			return &copyProfile, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *organizerRepositoryMock) Upsert(ctx context.Context, profile *entity.OrganizerProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

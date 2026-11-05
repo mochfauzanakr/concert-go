@@ -27,8 +27,20 @@ func (r *organizerRepositoryImpl) FindByUserID(ctx context.Context, userID uuid.
 		WHERE user_id = $1
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, userID)
+	return r.scanRow(r.db.QueryRowContext(ctx, query, userID))
+}
 
+func (r *organizerRepositoryImpl) FindByIDOrUserID(ctx context.Context, id uuid.UUID) (*entity.OrganizerProfile, error) {
+	query := `
+		SELECT id, user_id, org_name, logo_url, description, phone, social_media, created_at, updated_at
+		FROM organizer_profiles
+		WHERE id = $1 OR user_id = $1
+		LIMIT 1
+	`
+	return r.scanRow(r.db.QueryRowContext(ctx, query, id))
+}
+
+func (r *organizerRepositoryImpl) scanRow(row *sql.Row) (*entity.OrganizerProfile, error) {
 	var p entity.OrganizerProfile
 	var logoURL, description, phone, socialMedia sql.NullString
 

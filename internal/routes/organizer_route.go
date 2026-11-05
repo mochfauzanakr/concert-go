@@ -15,6 +15,7 @@ func OrganizerRoute(router *gin.RouterGroup, organizerHandler *handler.Organizer
 		protected.Use(middleware.AuthMiddleware(jwtSecret))
 		protected.Use(middleware.RequireRole(roleRepo, "ORGANIZER"))
 		{
+			protected.GET("/profile", organizerHandler.GetProfile)
 			protected.PUT("/profile", organizerHandler.UpsertProfile)
 		}
 	}

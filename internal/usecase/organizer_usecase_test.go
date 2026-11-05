@@ -102,3 +102,50 @@ func TestOrganizerUsecase_UpsertProfile(t *testing.T) {
 		}
 	})
 }
+
+func TestOrganizerUsecase_GetProfile(t *testing.T) {
+	ctx := context.Background()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	storageService := &mockStorageService{}
+
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, storageService)
+
+	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+	organizerID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       organizerID,
+		RoleID:   &orgRole.ID,
+		Name:     "Organizer User",
+		Email:    "contact@soundrhythm.com",
+		Provider: "email",
+		Status:   entity.UserStatusActive,
+	})
+
+	t.Run("profile not found before setup", func(t *testing.T) {
+		_, err := uc.GetProfile(ctx, organizerID)
+		if err == nil {
+			t.Fatal("expected error when profile does not exist yet")
+		}
+	})
+
+	t.Run("success get profile", func(t *testing.T) {
+		_, _ = uc.UpsertProfile(ctx, organizerID, request.UpsertOrganizerProfileRequest{
+			OrgName:     "SoundRhythm Live",
+			Description: "International Music Promoter",
+			Phone:       "081234567890",
+		}, nil)
+
+		res, err := uc.GetProfile(ctx, organizerID)
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if res.OrgName != "SoundRhythm Live" {
+			t.Errorf("expected OrgName SoundRhythm Live, got %s", res.OrgName)
+		}
+		if res.Email != "contact@soundrhythm.com" {
+			t.Errorf("expected Email contact@soundrhythm.com, got %s", res.Email)
+		}
+	})
+}

@@ -10,6 +10,7 @@ import (
 	"concert-go/internal/util"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type OrganizerHandler struct {
@@ -18,6 +19,22 @@ type OrganizerHandler struct {
 
 func NewOrganizerHandler(organizerUsecase *usecase.OrganizerUsecase) *OrganizerHandler {
 	return &OrganizerHandler{organizerUsecase: organizerUsecase}
+}
+
+func (h *OrganizerHandler) GetProfile(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	res, err := h.organizerUsecase.GetProfile(c.Request.Context(), session.UserID)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Organizer profile fetched successfully", res, nil)
 }
 
 func (h *OrganizerHandler) UpsertProfile(c *gin.Context) {
