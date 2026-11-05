@@ -37,6 +37,23 @@ func (h *OrganizerHandler) GetProfile(c *gin.Context) {
 	util.RespondOK(c, "Organizer profile fetched successfully", res, nil)
 }
 
+func (h *OrganizerHandler) GetPublicProfile(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		util.RespondBadRequest(c, "Invalid organizer ID format", err.Error())
+		return
+	}
+
+	res, err := h.organizerUsecase.GetPublicProfile(c.Request.Context(), id)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Organizer profile fetched successfully", res, nil)
+}
+
 func (h *OrganizerHandler) UpsertProfile(c *gin.Context) {
 	session, ok := middleware.GetUserSession(c)
 	if !ok || session == nil {

@@ -117,6 +117,27 @@ func (u *OrganizerUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*r
 
 	return toOrganizerProfileResponse(profile, user.Email), nil
 }
+
+func (u *OrganizerUsecase) GetPublicProfile(ctx context.Context, id uuid.UUID) (*response.OrganizerProfileResponse, error) {
+	profile, err := u.organizerRepo.FindByIDOrUserID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
+		return nil, exception.NotFound("organizer profile not found")
+	}
+
+	user, err := u.userRepo.FindByID(ctx, profile.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil || user.Status == entity.UserStatusSuspended {
+		return nil, exception.NotFound("organizer profile not found")
+	}
+
+	return toOrganizerProfileResponse(profile, user.Email), nil
+}
+
 func toOrganizerProfileResponse(profile *entity.OrganizerProfile, email string) *response.OrganizerProfileResponse {
 	return &response.OrganizerProfileResponse{
 		ID:          profile.ID,

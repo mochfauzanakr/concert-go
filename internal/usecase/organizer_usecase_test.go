@@ -149,3 +149,67 @@ func TestOrganizerUsecase_GetProfile(t *testing.T) {
 		}
 	})
 }
+
+func TestOrganizerUsecase_GetPublicProfile(t *testing.T) {
+	ctx := context.Background()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
+	userRepo := mock.NewUserRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	storageService := &mockStorageService{}
+
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, storageService)
+
+	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+	organizerID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:       organizerID,
+		RoleID:   &orgRole.ID,
+		Name:     "Organizer User",
+		Email:    "public@soundrhythm.com",
+		Provider: "email",
+		Status:   entity.UserStatusActive,
+	})
+
+	created, _ := uc.UpsertProfile(ctx, organizerID, request.UpsertOrganizerProfileRequest{
+		OrgName:     "SoundRhythm Public",
+		Description: "Public Profile",
+	}, nil)
+
+	t.Run("not found for unknown id", func(t *testing.T) {
+		_, err := uc.GetPublicProfile(ctx, uuid.New())
+		if err == nil {
+			t.Fatal("expected error for non-existent id")
+		}
+	})
+
+	t.Run("found by profile ID", func(t *testing.T) {
+		res, err := uc.GetPublicProfile(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if res.OrgName != "SoundRhythm Public" {
+			t.Errorf("expected OrgName SoundRhythm Public, got %s", res.OrgName)
+		}
+	})
+
+	t.Run("found by organizer user ID", func(t *testing.T) {
+		res, err := uc.GetPublicProfile(ctx, organizerID)
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if res.ID != created.ID {
+			t.Errorf("expected profile ID %s, got %s", created.ID, res.ID)
+		}
+	})
+
+	t.Run("not found when organizer account is suspended", func(t *testing.T) {
+		u, _ := userRepo.FindByID(ctx, organizerID)
+		u.Status = entity.UserStatusSuspended
+		_ = userRepo.Update(ctx, u)
+
+		_, err := uc.GetPublicProfile(ctx, created.ID)
+		if err == nil {
+			t.Fatal("expected not found error when organizer is suspended")
+		}
+	})
+}
