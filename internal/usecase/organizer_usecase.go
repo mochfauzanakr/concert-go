@@ -21,6 +21,7 @@ type OrganizerUsecase struct {
 	userRepo       repository.UserRepository
 	inviteRepo     repository.InviteRepository
 	roleRepo       repository.RoleRepository
+	sessionRepo    repository.SessionRepository
 	storageService util.StorageService
 }
 
@@ -29,6 +30,7 @@ func NewOrganizerUsecase(
 	userRepo repository.UserRepository,
 	inviteRepo repository.InviteRepository,
 	roleRepo repository.RoleRepository,
+	sessionRepo repository.SessionRepository,
 	storageService util.StorageService,
 ) *OrganizerUsecase {
 	return &OrganizerUsecase{
@@ -36,6 +38,7 @@ func NewOrganizerUsecase(
 		userRepo:       userRepo,
 		inviteRepo:     inviteRepo,
 		roleRepo:       roleRepo,
+		sessionRepo:    sessionRepo,
 		storageService: storageService,
 	}
 }
@@ -210,6 +213,72 @@ func (u *OrganizerUsecase) GetStaffList(
 	return &response.PageResponse[response.UserListItemResponse]{
 		Items:      items,
 		Pagination: model.BuildPagination(total, page, pageSize),
+	}, nil
+}
+
+func (u *OrganizerUsecase) UpdateStaffStatus(
+	ctx context.Context,
+	organizerID uuid.UUID,
+	staffID uuid.UUID,
+	req request.UpdateUserStatusRequest,
+) (*response.UserDetailResponse, error) {
+	status := strings.ToUpper(strings.TrimSpace(req.Status))
+	if status != entity.UserStatusActive && status != entity.UserStatusSuspended {
+		return nil, exception.BadRequest("status must be ACTIVE or SUSPENDED")
+	}
+
+	targetUser, err := u.userRepo.FindByID(ctx, staffID)
+	if err != nil {
+		return nil, err
+	}
+	if targetUser == nil {
+		return nil, exception.NotFound("staff user not found")
+	}
+
+	targetRoleName := "UNKNOWN"
+	if targetUser.RoleID != nil && u.roleRepo != nil {
+		if r, err := u.roleRepo.FindByID(ctx, *targetUser.RoleID); err == nil && r != nil {
+			targetRoleName = r.Name
+		}
+	}
+	if targetRoleName != "STAFF" {
+		return nil, exception.Forbidden("target user is not a staff member")
+	}
+
+	emails, err := u.inviteRepo.FindAcceptedEmailsByInviter(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+
+	owned := false
+	for _, email := range emails {
+		if strings.EqualFold(email, targetUser.Email) {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		return nil, exception.Forbidden("you do not have permission to manage this staff")
+	}
+
+	targetUser.Status = status
+	if err := u.userRepo.Update(ctx, targetUser); err != nil {
+		return nil, err
+	}
+
+	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
+		_ = u.sessionRepo.RevokeByUserID(ctx, staffID)
+	}
+
+	return &response.UserDetailResponse{
+		ID:        targetUser.ID,
+		RoleID:    targetUser.RoleID,
+		Name:      targetUser.Name,
+		Email:     targetUser.Email,
+		AvatarURL: targetUser.AvatarURL,
+		Provider:  targetUser.Provider,
+		Status:    targetUser.Status,
+		CreatedAt: targetUser.CreatedAt,
 	}, nil
 }
 

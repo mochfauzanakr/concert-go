@@ -124,3 +124,32 @@ func (h *OrganizerHandler) GetStaffList(c *gin.Context) {
 
 	util.RespondOK(c, "Organizer staff fetched successfully", res.Items, &res.Pagination)
 }
+
+func (h *OrganizerHandler) UpdateStaffStatus(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	idStr := c.Param("id")
+	staffID, err := uuid.Parse(idStr)
+	if err != nil {
+		util.RespondBadRequest(c, "Invalid staff ID format", err.Error())
+		return
+	}
+
+	var req request.UpdateUserStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	res, err := h.organizerUsecase.UpdateStaffStatus(c.Request.Context(), session.UserID, staffID, req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Staff status updated successfully", res, nil)
+}
