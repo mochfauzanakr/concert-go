@@ -43,7 +43,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 | :--- | :--- | :--- |
 | **SUPER_ADMIN** | Database Seeding (Tanpa Registrasi/Invite) | Akses mutlak sistem. Mengundang `ADMIN` dan `ORGANIZER`. Tidak dapat membuat Super Admin lain. |
 | **ADMIN** | Diundang oleh `SUPER_ADMIN` | Mengelola data user, memantau sistem, mengundang `ORGANIZER`. |
-| **ORGANIZER** | Diundang oleh `SUPER_ADMIN` atau `ADMIN` | Membuat & mengelola event, tiket, kuota, harga, serta mengundang `STAFF`. |
+| **ORGANIZER** | Diundang oleh `SUPER_ADMIN` / `ADMIN` (Direct Invite atau via Pengajuan Kemitraan Publik) | Membuat & mengelola event, tiket, kuota, harga, serta mengundang `STAFF`. |
 | **STAFF** | Diundang oleh `ORGANIZER` | Hak akses terbatas pada event terkait (scan & validasi QR tiket di gate). |
 | **USER** | Registrasi Mandiri (Email, OTP, Google OAuth) | Pengguna umum: jelajah event, beli tiket, riwayat transaksi, akses QR tiket. |
 
@@ -202,6 +202,27 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
   - Ketika staf di-suspend (`SUSPENDED`), seluruh sesi aktif staf tersebut di tabel `sessions` otomatis dicabut (*revoked*).
 - **Catatan Modul Event (FD-4.0)**:
   - Penugasan staf dan co-organizer ke event tertentu (`event_organizers`) didefinisikan pada modul Event Management (FD-4.0).
+
+#### F-3.3 Public Organizer Partnership Application (Inbound Lead / Become an Organizer)
+- **Akses**:
+  - `POST /api/organizers/apply`: Publik (Tanpa Login, dilindungi Rate Limiter ketat per IP/Email).
+  - `GET /api/organizers/applications` & `PATCH /api/organizers/applications/:id/review`: `SUPER_ADMIN` dan `ADMIN`.
+- **Tujuan Bisnis**: Menyediakan jalur pendaftaran terbuka bagi promotor/EO eksternal untuk mengajukan kemitraan di platform tanpa harus menunggu diundang lebih dulu secara manual.
+- **Input (`POST /api/organizers/apply`)**:
+  - `picName`: string (wajib, min 2, max 100 — nama penanggung jawab).
+  - `email`: string (wajib, format email valid, belum terdaftar di `users`).
+  - `phone`: string (wajib, min 8, max 20 — nomor telepon/WhatsApp aktif).
+  - `orgName`: string (wajib, min 3, max 100 — nama organisasi/promotor).
+  - `socialMedia`: string (opsional, tautan media sosial / portofolio website).
+  - `description`: string (wajib, min 10 — deskripsi organisasi dan rencana event).
+- **Aturan Bisnis & Alur Persetujuan**:
+  - **Tolak (`409 Conflict`)** jika `email` sudah terdaftar sebagai user aktif atau masih memiliki pengajuan berstatus `PENDING`.
+  - Pengajuan baru disimpan di tabel `organizer_applications` dengan status awal `PENDING`.
+  - Admin meninjau daftar pengajuan melalui `GET /api/organizers/applications` (mendukung filter `status`, `search`, dan pagination).
+  - Saat Admin mengeksekusi `PATCH /api/organizers/applications/:id/review` dengan `status: "APPROVED"`:
+    1. Sistem otomatis memicu pengiriman email undangan (`invites`) dengan role `ORGANIZER` ke alamat `email` pengaju (TTL 24 jam).
+    2. Saat pengaju mengklik tautan undangan dan menyelesaikan `POST /api/users/accept-invite`, sistem otomatis membuat akun `USER` ber-role `ORGANIZER` sekaligus menginisialisasi data `organizer_profiles` (`org_name`, `phone`, `social_media`, `description`) dari data pengajuan sehingga organizer tidak perlu mengetik ulang profilnya.
+  - Jika Admin memilih `status: "REJECTED"` (opsional disertakan `rejectionReason`), status pengajuan berubah menjadi `REJECTED` dan tidak ada undangan yang dikirim.
 
 ---
 
