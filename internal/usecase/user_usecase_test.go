@@ -47,7 +47,7 @@ func TestUserUsecase_InviteUser_Hierarchy(t *testing.T) {
 	superAdminID := 1
 	adminID := 2
 	organizerID := 3
-	buyerID := 4
+	userID := 4
 
 	inviterID := uuid.New()
 
@@ -124,7 +124,7 @@ func TestUserUsecase_InviteUser_Hierarchy(t *testing.T) {
 	})
 
 	t.Run("USER cannot invite anyone", func(t *testing.T) {
-		_, err := uc.InviteUser(ctx, inviterID, &buyerID, request.InviteUserRequest{
+		_, err := uc.InviteUser(ctx, inviterID, &userID, request.InviteUserRequest{
 			Email: "somebody@example.com",
 			Role:  "STAFF",
 		})
@@ -354,7 +354,7 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
 
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
-	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
 
 	_ = userRepo.Create(ctx, &entity.User{
 		Name:     "Alice Admin",
@@ -366,14 +366,14 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	_ = userRepo.Create(ctx, &entity.User{
 		Name:     "Bob Buyer",
 		Email:    "bob@example.com",
-		RoleID:   &buyerRole.ID,
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusActive,
 		Provider: "email",
 	})
 	_ = userRepo.Create(ctx, &entity.User{
 		Name:     "Charlie Suspended",
 		Email:    "charlie@example.com",
-		RoleID:   &buyerRole.ID,
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusSuspended,
 		Provider: "email",
 	})
@@ -576,13 +576,13 @@ func TestUserUsecase_UpdateProfile(t *testing.T) {
 
 	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, storageService, cfg)
 
-	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
 	userID := uuid.New()
 	_ = userRepo.Create(ctx, &entity.User{
 		ID:       userID,
 		Name:     "Old Name",
 		Email:    "profile@example.com",
-		RoleID:   &buyerRole.ID,
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusActive,
 		Provider: "email",
 	})
@@ -639,12 +639,12 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
 	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
-	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
 
 	superAdminID := uuid.New()
 	admin1ID := uuid.New()
 	admin2ID := uuid.New()
-	buyerID := uuid.New()
+	userID := uuid.New()
 
 	_ = userRepo.Create(ctx, &entity.User{
 		ID:       superAdminID,
@@ -671,10 +671,10 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 		Provider: "email",
 	})
 	_ = userRepo.Create(ctx, &entity.User{
-		ID:       buyerID,
+		ID:       userID,
 		Name:     "Buyer Bob",
-		Email:    "buyer@example.com",
-		RoleID:   &buyerRole.ID,
+		Email:    "user@example.com",
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusActive,
 		Provider: "email",
 	})
@@ -682,7 +682,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	t.Run("cannot change own role", func(t *testing.T) {
 		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, admin1ID, request.AdminUpdateUserRequest{
 			Name:   "Admin 1 Renamed",
-			RoleID: buyerRole.ID,
+			RoleID: userRole.ID,
 		})
 		if err == nil {
 			t.Fatal("expected error on self role demotion/change")
@@ -700,7 +700,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	})
 
 	t.Run("ADMIN cannot promote to SUPER_ADMIN", func(t *testing.T) {
-		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, userID, request.AdminUpdateUserRequest{
 			Name:   "Buyer Promoted",
 			RoleID: superAdminRole.ID,
 		})
@@ -710,7 +710,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	})
 
 	t.Run("ADMIN cannot promote to ADMIN", func(t *testing.T) {
-		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, userID, request.AdminUpdateUserRequest{
 			Name:   "Buyer Promoted To Admin",
 			RoleID: adminRole.ID,
 		})
@@ -719,8 +719,8 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 		}
 	})
 
-	t.Run("ADMIN can update BUYER to ORGANIZER", func(t *testing.T) {
-		res, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+	t.Run("ADMIN can update USER to ORGANIZER", func(t *testing.T) {
+		res, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, userID, request.AdminUpdateUserRequest{
 			Name:   "Buyer To Organizer",
 			RoleID: organizerRole.ID,
 		})

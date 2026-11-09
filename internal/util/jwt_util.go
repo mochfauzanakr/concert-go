@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// JWTClaims holds standard and custom token claims
 type JWTClaims struct {
 	UserID    uuid.UUID `json:"userId"`
 	Email     string    `json:"email"`
@@ -22,7 +21,6 @@ type JWTClaims struct {
 	IssuedAt  int64     `json:"iat"`
 }
 
-// GenerateJWT creates a signed HMAC-SHA256 JWT
 func GenerateJWT(secret string, claims JWTClaims) (string, error) {
 	header := map[string]string{
 		"alg": "HS256",
@@ -51,7 +49,6 @@ func GenerateJWT(secret string, claims JWTClaims) (string, error) {
 	return dataToSign + "." + encodedSignature, nil
 }
 
-// ValidateJWT verifies signature and expiration, then returns claims
 func ValidateJWT(secret string, tokenStr string) (*JWTClaims, error) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
@@ -90,7 +87,6 @@ func ValidateJWT(secret string, tokenStr string) (*JWTClaims, error) {
 	return &claims, nil
 }
 
-// HashToken hashes a refresh token string using SHA256 for safe DB storage
 func HashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])

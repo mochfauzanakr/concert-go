@@ -45,7 +45,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 | **ADMIN** | Diundang oleh `SUPER_ADMIN` | Mengelola data user, memantau sistem, mengundang `ORGANIZER`. |
 | **ORGANIZER** | Diundang oleh `SUPER_ADMIN` atau `ADMIN` | Membuat & mengelola event, tiket, kuota, harga, serta mengundang `STAFF`. |
 | **STAFF** | Diundang oleh `ORGANIZER` | Hak akses terbatas pada event terkait (scan & validasi QR tiket di gate). |
-| **BUYER** | Registrasi Mandiri (Email, OTP, Google OAuth) | Pengguna umum: jelajah event, beli tiket, riwayat transaksi, akses QR tiket. |
+| **USER** | Registrasi Mandiri (Email, OTP, Google OAuth) | Pengguna umum: jelajah event, beli tiket, riwayat transaksi, akses QR tiket. |
 
 ---
 
@@ -54,18 +54,18 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 ### FD-1.0: Autentikasi & Akun Pribadi (Authentication & Account)
 
 #### F-1.1 Register & Login (Buyer Mandiri)
-- **Akses**: Publik (`BUYER`).
+- **Akses**: Publik (`USER`).
 - **Input Register**: `name`, `email`, `password`.
 - **Input Login**: `email`, `password`.
 - **Validasi**: Email valid, password minimal 8 karakter.
 
 #### F-1.2 OTP Login & Register (Passwordless)
-- **Akses**: Publik (`BUYER`).
+- **Akses**: Publik (`USER`).
 - **Input**: `email`, `otp` (6 digit numerik).
 - **Aturan**: OTP dikirim via email, masa aktif (TTL) 5 menit.
 
 #### F-1.3 OAuth2 Login (Google)
-- **Akses**: Publik (`BUYER`).
+- **Akses**: Publik (`USER`).
 - **Alur**: Redirect ke Google OAuth -> Callback menerima profil -> Buat/login user.
 
 #### F-1.4 Change Password (Ubah Kata Sandi)
@@ -165,7 +165,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 #### F-3.1 Organizer Profile Setup & Management
 - **Akses**:
   - `GET /api/organizers/profile` & `PUT /api/organizers/profile`: `ORGANIZER` (setelah aktivasi akun via invite).
-  - `GET /api/organizers/:id`: Publik (dapat diakses oleh `BUYER` / pengunjung untuk melihat profil promotor penyelenggara event).
+  - `GET /api/organizers/:id`: Publik (dapat diakses oleh `USER` / pengunjung untuk melihat profil promotor penyelenggara event).
 - **Endpoint**:
   - `GET /api/organizers/profile`: Mendapatkan data profil organisasi dari organizer yang sedang login (termasuk email dari akun `users`).
   - `PUT /api/organizers/profile`: Membuat atau memperbarui profil organisasi.
@@ -210,7 +210,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 *(Catatan: Pengelolaan jenis tiket, gelombang harga, dan alokasi kuota `ONLINE`/`OFFLINE` dipisahkan ke modul **FD-5.0: Ticket, Pricing & Inventory Management**).*
 
 #### F-4.1 Public Event Catalog & Detail
-- **Akses**: Publik (Semua pengunjung / `BUYER`).
+- **Akses**: Publik (Semua pengunjung / `USER`).
 - **Endpoint**:
   - `GET /api/events`: Daftar seluruh event dengan status `PUBLISHED`.
     - **Query Parameters**: `page`, `pageSize`, `search` (nama event / artis), `city`, `category`, `startDate`, `endDate`, `sortBy`.
