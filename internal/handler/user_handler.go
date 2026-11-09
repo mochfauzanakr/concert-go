@@ -2,7 +2,6 @@ package handler
 
 import (
 	"mime/multipart"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -42,11 +41,7 @@ func (h *UserHandler) InviteUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Invitation sent successfully",
-		"data":    res,
-		"status":  "T",
-	})
+	util.RespondCreated(c, "Invitation sent successfully", res)
 }
 
 func (h *UserHandler) AcceptInvite(c *gin.Context) {
@@ -70,11 +65,7 @@ func (h *UserHandler) AcceptInvite(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Account activated successfully",
-		"data":    user,
-		"status":  "T",
-	})
+	util.RespondCreated(c, "Account activated successfully", user)
 }
 
 func (h *UserHandler) ValidateInvite(c *gin.Context) {
