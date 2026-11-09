@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/domain/payload/response"
 	"concert-go/internal/exception"
@@ -18,17 +19,23 @@ import (
 type OrganizerUsecase struct {
 	organizerRepo  repository.OrganizerRepository
 	userRepo       repository.UserRepository
+	inviteRepo     repository.InviteRepository
+	roleRepo       repository.RoleRepository
 	storageService util.StorageService
 }
 
 func NewOrganizerUsecase(
 	organizerRepo repository.OrganizerRepository,
 	userRepo repository.UserRepository,
+	inviteRepo repository.InviteRepository,
+	roleRepo repository.RoleRepository,
 	storageService util.StorageService,
 ) *OrganizerUsecase {
 	return &OrganizerUsecase{
 		organizerRepo:  organizerRepo,
 		userRepo:       userRepo,
+		inviteRepo:     inviteRepo,
+		roleRepo:       roleRepo,
 		storageService: storageService,
 	}
 }
@@ -136,6 +143,74 @@ func (u *OrganizerUsecase) GetPublicProfile(ctx context.Context, id uuid.UUID) (
 	}
 
 	return toOrganizerProfileResponse(profile, user.Email), nil
+}
+
+func (u *OrganizerUsecase) GetStaffList(
+	ctx context.Context,
+	organizerID uuid.UUID,
+	req request.GetOrganizerStaffListRequest,
+) (*response.PageResponse[response.UserListItemResponse], error) {
+	page := req.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 20 {
+		pageSize = 20
+	}
+
+	emails, err := u.inviteRepo.FindAcceptedEmailsByInviter(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	if len(emails) == 0 {
+		return &response.PageResponse[response.UserListItemResponse]{
+			Items:      []response.UserListItemResponse{},
+			Pagination: model.BuildPagination(0, page, pageSize),
+		}, nil
+	}
+
+	var staffRoleID *int
+	if u.roleRepo != nil {
+		if r, err := u.roleRepo.FindByName(ctx, "STAFF"); err == nil && r != nil {
+			staffRoleID = &r.ID
+		}
+	}
+
+	filter := repository.UserFilter{
+		Search: strings.TrimSpace(req.Search),
+		RoleID: staffRoleID,
+		Status: strings.ToUpper(strings.TrimSpace(req.Status)),
+		Emails: emails,
+		Limit:  pageSize,
+		Offset: model.CalculateOffset(page, pageSize),
+	}
+
+	users, total, err := u.userRepo.FindAll(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]response.UserListItemResponse, 0, len(users))
+	for _, user := range users {
+		items = append(items, response.UserListItemResponse{
+			ID:        user.ID,
+			RoleID:    user.RoleID,
+			Name:      user.Name,
+			Email:     user.Email,
+			AvatarURL: user.AvatarURL,
+			Status:    user.Status,
+			CreatedAt: user.CreatedAt,
+		})
+	}
+
+	return &response.PageResponse[response.UserListItemResponse]{
+		Items:      items,
+		Pagination: model.BuildPagination(total, page, pageSize),
+	}, nil
 }
 
 func toOrganizerProfileResponse(profile *entity.OrganizerProfile, email string) *response.OrganizerProfileResponse {

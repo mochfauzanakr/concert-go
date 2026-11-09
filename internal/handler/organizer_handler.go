@@ -89,3 +89,38 @@ func (h *OrganizerHandler) UpsertProfile(c *gin.Context) {
 
 	util.RespondOK(c, "Organizer profile updated successfully", res, nil)
 }
+
+func (h *OrganizerHandler) GetStaffList(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	page := util.ParseQueryInt(c, "page", 1)
+	pageSize := util.ParseQueryInt(c, "pageSize", 10)
+	if c.Query("pageSize") == "" && c.Query("limit") != "" {
+		pageSize = util.ParseQueryInt(c, "limit", 10)
+	}
+
+	search := strings.TrimSpace(c.Query("search"))
+	if search == "" {
+		search = strings.TrimSpace(c.Query("searchQuery"))
+	}
+	status := strings.TrimSpace(c.Query("status"))
+
+	req := request.GetOrganizerStaffListRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Search:   search,
+		Status:   status,
+	}
+
+	res, err := h.organizerUsecase.GetStaffList(c.Request.Context(), session.UserID, req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Organizer staff fetched successfully", res.Items, &res.Pagination)
+}

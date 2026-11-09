@@ -17,6 +17,7 @@ func OrganizerRoute(router *gin.RouterGroup, organizerHandler *handler.Organizer
 		{
 			protected.GET("/profile", organizerHandler.GetProfile)
 			protected.PUT("/profile", organizerHandler.UpsertProfile)
+			protected.GET("/staff", organizerHandler.GetStaffList)
 		}
 
 		organizers.GET("/:id", organizerHandler.GetPublicProfile)

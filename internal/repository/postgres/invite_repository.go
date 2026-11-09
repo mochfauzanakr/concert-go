@@ -75,6 +75,30 @@ func (r *inviteRepositoryImpl) FindPendingByEmail(ctx context.Context, email str
 	return scanInvite(row)
 }
 
+func (r *inviteRepositoryImpl) FindAcceptedEmailsByInviter(ctx context.Context, inviterID uuid.UUID) ([]string, error) {
+	query := `
+		SELECT DISTINCT LOWER(email)
+		FROM invites
+		WHERE invited_by = $1 AND status = $2
+	`
+	rows, err := r.db.QueryContext(ctx, query, inviterID, entity.InviteStatusAccepted)
+	if err != nil {
+		log.Printf("[SQL Error - FindAcceptedEmailsByInviter] %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	emails := make([]string, 0)
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		emails = append(emails, email)
+	}
+	return emails, rows.Err()
+}
+
 func (r *inviteRepositoryImpl) UpdateStatus(ctx context.Context, id uuid.UUID, status string, acceptedAt *time.Time) error {
 	query := `
 		UPDATE invites

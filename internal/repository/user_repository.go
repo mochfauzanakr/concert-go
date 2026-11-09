@@ -8,16 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// UserFilter defines options for querying user lists
 type UserFilter struct {
 	Search string
 	RoleID *int
 	Status string
+	Emails []string
 	Limit  int
 	Offset int
 }
 
-// UserRepository contract for user data persistence
 type UserRepository interface {
 	Create(ctx context.Context, user *entity.User) error
 	Update(ctx context.Context, user *entity.User) error

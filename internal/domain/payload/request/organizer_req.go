@@ -6,3 +6,10 @@ type UpsertOrganizerProfileRequest struct {
 	Phone       string `json:"phone"`
 	SocialMedia string `json:"socialMedia"`
 }
+
+type GetOrganizerStaffListRequest struct {
+	Page     int
+	PageSize int
+	Search   string
+	Status   string
+}

@@ -68,6 +68,24 @@ func (m *inviteRepositoryMock) FindPendingByEmail(ctx context.Context, email str
 	return nil, nil
 }
 
+func (m *inviteRepositoryMock) FindAcceptedEmailsByInviter(ctx context.Context, inviterID uuid.UUID) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	emails := make([]string, 0)
+	for _, inv := range m.invites {
+		if inv.InvitedBy == inviterID && inv.Status == entity.InviteStatusAccepted {
+			lower := strings.ToLower(strings.TrimSpace(inv.Email))
+			if _, exists := seen[lower]; !exists {
+				seen[lower] = struct{}{}
+				emails = append(emails, lower)
+			}
+		}
+	}
+	return emails, nil
+}
+
 func (m *inviteRepositoryMock) UpdateStatus(ctx context.Context, id uuid.UUID, status string, acceptedAt *time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

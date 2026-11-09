@@ -17,10 +17,11 @@ func TestOrganizerUsecase_UpsertProfile(t *testing.T) {
 	ctx := context.Background()
 	organizerRepo := mock.NewOrganizerRepositoryMock()
 	userRepo := mock.NewUserRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, storageService)
 
 	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	organizerID := uuid.New()
@@ -107,10 +108,11 @@ func TestOrganizerUsecase_GetProfile(t *testing.T) {
 	ctx := context.Background()
 	organizerRepo := mock.NewOrganizerRepositoryMock()
 	userRepo := mock.NewUserRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, storageService)
 
 	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	organizerID := uuid.New()
@@ -154,10 +156,11 @@ func TestOrganizerUsecase_GetPublicProfile(t *testing.T) {
 	ctx := context.Background()
 	organizerRepo := mock.NewOrganizerRepositoryMock()
 	userRepo := mock.NewUserRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, storageService)
 
 	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	organizerID := uuid.New()
@@ -210,6 +213,116 @@ func TestOrganizerUsecase_GetPublicProfile(t *testing.T) {
 		_, err := uc.GetPublicProfile(ctx, created.ID)
 		if err == nil {
 			t.Fatal("expected not found error when organizer is suspended")
+		}
+	})
+}
+
+func TestOrganizerUsecase_GetStaffList(t *testing.T) {
+	ctx := context.Background()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
+	userRepo := mock.NewUserRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	storageService := &mockStorageService{}
+
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, storageService)
+
+	staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
+	organizerA := uuid.New()
+	organizerB := uuid.New()
+
+	// Staff 1 invited by Organizer A (ACTIVE)
+	staff1ID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:     staff1ID,
+		RoleID: &staffRole.ID,
+		Name:   "Alice Gate",
+		Email:  "alice@staff.com",
+		Status: entity.UserStatusActive,
+	})
+	_ = inviteRepo.Create(ctx, &entity.Invite{
+		ID:        uuid.New(),
+		Email:     "alice@staff.com",
+		RoleID:    staffRole.ID,
+		InvitedBy: organizerA,
+		TokenHash: "hash-alice",
+		Status:    entity.InviteStatusAccepted,
+	})
+
+	// Staff 2 invited by Organizer A (SUSPENDED)
+	staff2ID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:     staff2ID,
+		RoleID: &staffRole.ID,
+		Name:   "Bob Scanner",
+		Email:  "bob@staff.com",
+		Status: entity.UserStatusSuspended,
+	})
+	_ = inviteRepo.Create(ctx, &entity.Invite{
+		ID:        uuid.New(),
+		Email:     "bob@staff.com",
+		RoleID:    staffRole.ID,
+		InvitedBy: organizerA,
+		TokenHash: "hash-bob",
+		Status:    entity.InviteStatusAccepted,
+	})
+
+	// Staff 3 invited by Organizer B (should not appear for Organizer A)
+	staff3ID := uuid.New()
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:     staff3ID,
+		RoleID: &staffRole.ID,
+		Name:   "Charlie Other",
+		Email:  "charlie@staff.com",
+		Status: entity.UserStatusActive,
+	})
+	_ = inviteRepo.Create(ctx, &entity.Invite{
+		ID:        uuid.New(),
+		Email:     "charlie@staff.com",
+		RoleID:    staffRole.ID,
+		InvitedBy: organizerB,
+		TokenHash: "hash-charlie",
+		Status:    entity.InviteStatusAccepted,
+	})
+
+	t.Run("returns only staff invited by current organizer", func(t *testing.T) {
+		res, err := uc.GetStaffList(ctx, organizerA, request.GetOrganizerStaffListRequest{
+			Page:     1,
+			PageSize: 10,
+		})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if len(res.Items) != 2 {
+			t.Fatalf("expected 2 staff for organizerA, got %d", len(res.Items))
+		}
+	})
+
+	t.Run("filters staff by search and status", func(t *testing.T) {
+		res, err := uc.GetStaffList(ctx, organizerA, request.GetOrganizerStaffListRequest{
+			Page:     1,
+			PageSize: 10,
+			Search:   "bob",
+			Status:   "SUSPENDED",
+		})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if len(res.Items) != 1 || res.Items[0].Email != "bob@staff.com" {
+			t.Fatalf("expected only bob@staff.com, got %+v", res.Items)
+		}
+	})
+
+	t.Run("returns empty list when organizer has no accepted invites", func(t *testing.T) {
+		res, err := uc.GetStaffList(ctx, uuid.New(), request.GetOrganizerStaffListRequest{
+			Page:     1,
+			PageSize: 10,
+		})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if len(res.Items) != 0 || res.Pagination.TotalRecords != 0 {
+			t.Fatalf("expected 0 items, got %d", len(res.Items))
 		}
 	})
 }

@@ -38,7 +38,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	roleUsecase := usecase.NewRoleUsecase(roleRepo)
 	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, emailSender, storageService, cfg)
-	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, storageService)
+	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, storageService)
 
 	helloHandler := handler.NewHelloHandler(helloUsecase)
 	roleHandler := handler.NewRoleHandler(roleUsecase)
