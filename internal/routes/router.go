@@ -17,6 +17,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	_ = r.SetTrustedProxies(nil)
 
+	r.Use(gin.Logger()) // ponytail: built-in stdout logger; upgrade to custom slog middleware when structured JSON/user_id logging is needed
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.RecoveryMiddleware())
 
