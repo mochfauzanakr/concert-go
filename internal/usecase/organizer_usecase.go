@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"log"
 	"mime/multipart"
 	"strings"
 	"time"
@@ -114,7 +113,7 @@ func (u *OrganizerUsecase) UpsertProfile(
 		return nil, err
 	}
 
-	return toOrganizerProfileResponse(profile, user.Email), nil
+	return toOrganizerProfileResponse(profile, &user.Email), nil
 }
 
 func (u *OrganizerUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*response.OrganizerProfileResponse, error) {
@@ -134,7 +133,7 @@ func (u *OrganizerUsecase) GetProfile(ctx context.Context, userID uuid.UUID) (*r
 		return nil, exception.NotFound("organizer profile not found")
 	}
 
-	return toOrganizerProfileResponse(profile, user.Email), nil
+	return toOrganizerProfileResponse(profile, &user.Email), nil
 }
 
 func (u *OrganizerUsecase) GetPublicProfile(ctx context.Context, id uuid.UUID) (*response.OrganizerProfileResponse, error) {
@@ -154,7 +153,8 @@ func (u *OrganizerUsecase) GetPublicProfile(ctx context.Context, id uuid.UUID) (
 		return nil, exception.NotFound("organizer profile not found")
 	}
 
-	return toOrganizerProfileResponse(profile, user.Email), nil
+	// public projection: omit the organizer's login email
+	return toOrganizerProfileResponse(profile, nil), nil
 }
 
 func (u *OrganizerUsecase) GetStaffList(
@@ -245,13 +245,15 @@ func (u *OrganizerUsecase) UpdateStaffStatus(
 		return nil, exception.Forbidden("you do not have permission to manage this staff")
 	}
 
+	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
+		if err := u.sessionRepo.RevokeByUserID(ctx, staffID); err != nil {
+			return nil, exception.Internal("failed to revoke staff sessions", err)
+		}
+	}
+
 	targetUser.Status = status
 	if err := u.userRepo.Update(ctx, targetUser); err != nil {
 		return nil, err
-	}
-
-	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
-		_ = u.sessionRepo.RevokeByUserID(ctx, staffID)
 	}
 
 	return &response.UserDetailResponse{
@@ -266,7 +268,7 @@ func (u *OrganizerUsecase) UpdateStaffStatus(
 	}, nil
 }
 
-func toOrganizerProfileResponse(profile *entity.OrganizerProfile, email string) *response.OrganizerProfileResponse {
+func toOrganizerProfileResponse(profile *entity.OrganizerProfile, email *string) *response.OrganizerProfileResponse {
 	return &response.OrganizerProfileResponse{
 		ID:          profile.ID,
 		UserID:      profile.UserID,
@@ -453,7 +455,6 @@ func (u *OrganizerUsecase) ReviewApplication(
 			baseURL = strings.TrimRight(strings.TrimSpace(u.cfg.FrontendURL), "/")
 		}
 		inviteURL := baseURL + "/accept-invite?token=" + rawToken
-		log.Printf("[DEV] Organizer Application Invite URL (%s): %s | Token: %s", app.Email, inviteURL, rawToken) // ponytail: stdout log for local testing; remove or gate by env before prod
 		if u.emailSender != nil {
 			if err := u.emailSender.SendInviteLink(app.Email, orgRole.Name, inviteURL); err != nil {
 				return nil, exception.Internal("failed to send invitation email", err)
