@@ -166,6 +166,12 @@ func (m *organizerRepositoryMock) FindAllApplications(ctx context.Context, filte
 		if filter.Status != "" && !strings.EqualFold(app.Status, filter.Status) {
 			continue
 		}
+		if filter.StartDate != nil && app.CreatedAt.Before(*filter.StartDate) {
+			continue
+		}
+		if filter.EndDate != nil && app.CreatedAt.After(*filter.EndDate) {
+			continue
+		}
 		if searchLower != "" {
 			matchPic := strings.Contains(strings.ToLower(app.PicName), searchLower)
 			matchEmail := strings.Contains(strings.ToLower(app.Email), searchLower)
@@ -178,8 +184,24 @@ func (m *organizerRepositoryMock) FindAllApplications(ctx context.Context, filte
 		filtered = append(filtered, &copyApp)
 	}
 
+	asc := strings.EqualFold(strings.TrimSpace(filter.SortOrder), "ASC")
+	sortBy := strings.ToLower(strings.TrimSpace(filter.SortBy))
 	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+		var less bool
+		switch sortBy {
+		case "picname", "pic_name":
+			less = strings.ToLower(filtered[i].PicName) < strings.ToLower(filtered[j].PicName)
+		case "orgname", "org_name":
+			less = strings.ToLower(filtered[i].OrgName) < strings.ToLower(filtered[j].OrgName)
+		case "email":
+			less = strings.ToLower(filtered[i].Email) < strings.ToLower(filtered[j].Email)
+		default:
+			less = filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+		}
+		if asc {
+			return less
+		}
+		return !less
 	})
 
 	total := len(filtered)

@@ -24,10 +24,8 @@ type ApplyOrganizerRequest struct {
 }
 
 type GetOrganizerApplicationListRequest struct {
-	Page     int
-	PageSize int
-	Search   string
-	Status   string
+	model.BaseListParams
+	Status string `json:"status"`
 }
 
 type ReviewOrganizerApplicationRequest struct {

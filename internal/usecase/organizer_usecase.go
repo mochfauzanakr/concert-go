@@ -354,23 +354,17 @@ func (u *OrganizerUsecase) GetApplications(
 	ctx context.Context,
 	req request.GetOrganizerApplicationListRequest,
 ) (*response.PageResponse[response.OrganizerApplicationResponse], error) {
-	page := req.Page
-	if page <= 0 {
-		page = 1
-	}
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 10
-	}
-	if pageSize > 20 {
-		pageSize = 20
-	}
+	req.Normalize(20)
 
 	filter := repository.OrganizerApplicationFilter{
-		Search: strings.TrimSpace(req.Search),
-		Status: strings.ToUpper(strings.TrimSpace(req.Status)),
-		Limit:  pageSize,
-		Offset: model.CalculateOffset(page, pageSize),
+		Search:    req.Search,
+		Status:    strings.ToUpper(strings.TrimSpace(req.Status)),
+		StartDate: req.StartDate,
+		EndDate:   req.EndDate,
+		SortBy:    req.SortBy,
+		SortOrder: req.SortOrder,
+		Limit:     req.PageSize,
+		Offset:    model.CalculateOffset(req.Page, req.PageSize),
 	}
 
 	apps, total, err := u.organizerRepo.FindAllApplications(ctx, filter)
@@ -385,7 +379,7 @@ func (u *OrganizerUsecase) GetApplications(
 
 	return &response.PageResponse[response.OrganizerApplicationResponse]{
 		Items:      items,
-		Pagination: model.BuildPagination(total, page, pageSize),
+		Pagination: model.BuildPagination(total, req.Page, req.PageSize),
 	}, nil
 }
 

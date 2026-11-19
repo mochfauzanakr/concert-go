@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/repository"
 
 	"github.com/google/uuid"
@@ -255,6 +256,18 @@ func (r *organizerRepositoryImpl) FindAllApplications(ctx context.Context, filte
 		argIdx++
 	}
 
+	if filter.StartDate != nil {
+		where = append(where, fmt.Sprintf("created_at >= $%d", argIdx))
+		args = append(args, *filter.StartDate)
+		argIdx++
+	}
+
+	if filter.EndDate != nil {
+		where = append(where, fmt.Sprintf("created_at <= $%d", argIdx))
+		args = append(args, *filter.EndDate)
+		argIdx++
+	}
+
 	whereClause := strings.Join(where, " AND ")
 
 	var total int
@@ -268,13 +281,25 @@ func (r *organizerRepositoryImpl) FindAllApplications(ctx context.Context, filte
 		limit = 10
 	}
 
+	sortCol := model.ResolveSortColumn(filter.SortBy, map[string]string{
+		"createdat":  "created_at",
+		"created_at": "created_at",
+		"picname":    "pic_name",
+		"pic_name":   "pic_name",
+		"orgname":    "org_name",
+		"org_name":   "org_name",
+		"email":      "email",
+		"status":     "status",
+	}, "created_at")
+	sortOrder := model.ResolveSortOrder(filter.SortOrder)
+
 	dataQuery := fmt.Sprintf(`
 		SELECT id, pic_name, email, phone, org_name, social_media, description, status, rejection_reason, reviewed_by, reviewed_at, created_at
 		FROM organizer_applications
 		WHERE %s
-		ORDER BY created_at DESC
+		ORDER BY %s %s
 		LIMIT $%d OFFSET $%d
-	`, whereClause, argIdx, argIdx+1)
+	`, whereClause, sortCol, sortOrder, argIdx, argIdx+1)
 
 	rows, err := r.db.QueryContext(ctx, dataQuery, append(args, limit, filter.Offset)...)
 	if err != nil {

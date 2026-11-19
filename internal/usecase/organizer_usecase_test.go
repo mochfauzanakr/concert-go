@@ -509,10 +509,12 @@ func TestOrganizerUsecase_PartnershipApplicationFlow(t *testing.T) {
 
 	t.Run("admin lists applications with search and status filter", func(t *testing.T) {
 		pageRes, err := uc.GetApplications(ctx, request.GetOrganizerApplicationListRequest{
-			Page:     1,
-			PageSize: 10,
-			Search:   "Java Festival",
-			Status:   "PENDING",
+			BaseListParams: model.BaseListParams{
+				Page:     1,
+				PageSize: 10,
+				Search:   "Java Festival",
+			},
+			Status: "PENDING",
 		})
 		if err != nil {
 			t.Fatalf("expected success, got %v", err)
