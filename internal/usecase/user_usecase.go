@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"log"
 	"mime/multipart"
 	"strings"
 	"time"
@@ -126,7 +125,6 @@ func (u *UserUsecase) InviteUser(ctx context.Context, inviterID uuid.UUID, invit
 		baseURL = strings.TrimRight(strings.TrimSpace(u.cfg.FrontendURL), "/")
 	}
 	inviteURL := baseURL + "/accept-invite?token=" + rawToken
-	log.Printf("[DEV] Invite URL (%s): %s | Token: %s", email, inviteURL, rawToken) // ponytail: stdout log for local testing; remove or gate by env before prod
 	if u.emailSender != nil {
 		if err := u.emailSender.SendInviteLink(email, targetRole.Name, inviteURL); err != nil {
 			return nil, exception.Internal("failed to send invitation email", err)
@@ -370,13 +368,15 @@ func (u *UserUsecase) UpdateUserStatus(
 		return nil, exception.Forbidden("admins cannot change status of other admins or super admins")
 	}
 
+	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
+		if err := u.sessionRepo.RevokeByUserID(ctx, targetUserID); err != nil {
+			return nil, exception.Internal("failed to revoke user sessions", err)
+		}
+	}
+
 	targetUser.Status = status
 	if err := u.userRepo.Update(ctx, targetUser); err != nil {
 		return nil, err
-	}
-
-	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
-		_ = u.sessionRepo.RevokeByUserID(ctx, targetUserID)
 	}
 
 	return &response.UserDetailResponse{
