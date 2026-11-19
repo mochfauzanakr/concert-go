@@ -32,8 +32,19 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 - `401 Unauthorized`: Token tidak ada, expired, atau tidak valid
 - `403 Forbidden`: Role tidak berhak mengakses resource
 - `404 Not Found`: Data tidak ditemukan
-- `422 Unprocessable Entity`: Melanggar aturan bisnis (contoh: kuota habis, email sudah terdaftar)
+- `409 Conflict`: Konflik state / duplikasi data (contoh: email sudah terdaftar, pengajuan sudah direview)
+- `422 Unprocessable Entity`: Melanggar aturan bisnis (contoh: kuota habis, profil organisasi belum dilengkapi)
 - `500 Internal Server Error`: Kegagalan server / database
+
+### 1.4 Standar Global Query Parameters (`BaseListParams`)
+Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri standar berikut (diekstrak melalui `util.ParseBaseListParams` ke `model.BaseListParams`):
+- `page`: Nomor halaman (default: `1`).
+- `pageSize` (atau `limit`): Jumlah item per halaman (default: `10`, maksimal: `20`).
+- `search` (atau `searchQuery`): Kata kunci pencarian teks bebas sesuai konteks tabel.
+- `sortBy`: Kolom pengurutan (di-whitelist per tabel untuk mencegah SQL Injection, default: `created_at`).
+- `sortOrder`: Arah pengurutan `ASC` atau `DESC` (default: `DESC`).
+- `startDate`: Filter batas bawah waktu pembuatan (`created_at >= startDate`, format ISO-8601 / `YYYY-MM-DD`).
+- `endDate`: Filter batas atas waktu pembuatan (`created_at <= endDate`, format ISO-8601 / `YYYY-MM-DD`).
 
 ---
 
@@ -289,3 +300,143 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
       - Jika `roleInEvent == "CO_ORGANIZER"`: Pengguna target wajib memiliki role `ORGANIZER`, berstatus `ACTIVE`, dan bukan merupakan Lead Organizer itu sendiri.
       - Tolak dengan `409 Conflict` jika pengguna sudah terdaftar di tim event tersebut.
   - `DELETE /api/events/:eventId/team/:userId`: Mencopot (unassign) `CO_ORGANIZER` atau `STAFF` dari event tersebut.
+
+---
+
+### FD-5.0: Ticket, Pricing Phase & Inventory Management
+
+#### F-5.1 Ticket Type & Master Inventory Setup
+- **Akses**:
+  - `GET /api/events/:eventId/ticket-types`: Publik (melihat ketersediaan & fase harga aktif) / `ORGANIZER` (melihat detail kuota penuh `ONLINE` & `OFFLINE`).
+  - Mutasi (`POST`, `PUT`, `DELETE`): `ORGANIZER` (Hanya **Lead Organizer** pemilik `events.organizer_id`).
+- **Prinsip Authority Kuota (`inventories`)**:
+  - Tabel `inventories` (`id`, `ticket_type_id`, `channel`, `quota`, `sold`, `reserved`) adalah **master kuota fisik**.
+  - Jika `events.inventory_mode == "ONLINE_ONLY"`, sistem membuat 1 baris inventory (`channel = "ONLINE"`).
+  - Jika `events.inventory_mode == "DUAL_CHANNEL"`, sistem membuat 2 baris inventory (`channel = "ONLINE"` dan `channel = "OFFLINE"`).
+- **Endpoint**:
+  - `GET /api/events/:eventId/ticket-types`: Daftar seluruh kategori tiket pada suatu event beserta rincian `inventories` dan `pricing_phases`.
+  - `POST /api/events/:eventId/ticket-types`: Membuat kategori tiket baru sekaligus menginisialisasi kuota fisik di `inventories`.
+    - **Input**:
+      ```json
+      {
+        "name": "Festival / GA",
+        "description": "Free standing area dekat panggung utama",
+        "onlineQuota": 500,
+        "offlineQuota": 100
+      }
+      ```
+  - `PUT /api/events/:eventId/ticket-types/:ticketTypeId`: Memperbarui nama, deskripsi, dan kuota fisik `inventories`.
+    - **Aturan Bisnis**: Kuota baru (`onlineQuota` / `offlineQuota`) **dilarang lebih kecil** dari jumlah tiket yang sudah terjual dan sedang ditahan (`quota >= sold + reserved`). Jika dilanggar, tolak dengan `422 Unprocessable Entity`.
+  - `DELETE /api/events/:eventId/ticket-types/:ticketTypeId`: Menghapus kategori tiket (Hanya diizinkan jika `sold == 0` dan `reserved == 0` di seluruh kanal).
+
+#### F-5.2 Pricing Phase (Gelombang Harga) Management
+- **Akses**: `ORGANIZER` (Hanya **Lead Organizer** pemilik `events.organizer_id`).
+- **Prinsip**:
+  - `pricing_phases` (`id`, `ticket_type_id`, `name`, `price`, `quota`, `sold`, `start_at`, `end_at`) mengatur harga aktif dan batas alokasi penjualan per gelombang (contoh: `Early Bird`, `Presale 1`, `Normal`), namun pemotongan stok fisik tetap merujuk ke tabel `inventories` (`channel = "ONLINE"`).
+  - Kolom `price` wajib menggunakan tipe `NUMERIC(15, 2)`.
+- **Endpoint**:
+  - `POST /api/ticket-types/:ticketTypeId/pricing-phases`: Menambahkan gelombang harga baru.
+    - **Input**:
+      ```json
+      {
+        "name": "Early Bird",
+        "price": 350000.00,
+        "quota": 150,
+        "startAt": "2026-12-01T10:00:00Z",
+        "endAt": "2026-12-10T23:59:59Z"
+      }
+      ```
+    - **Aturan Bisnis**:
+      - `price >= 0` dan `endAt > startAt`.
+      - `quota` gelombang harga tidak boleh melebihi `inventories.quota` kanal `ONLINE`.
+  - `PUT /api/ticket-types/:ticketTypeId/pricing-phases/:phaseId`: Memperbarui gelombang harga (`quota` baru tidak boleh `< sold`).
+  - `DELETE /api/ticket-types/:ticketTypeId/pricing-phases/:phaseId`: Menghapus gelombang harga (Hanya diizinkan jika `sold == 0`).
+
+#### F-5.3 Offline / On-The-Spot Sales Recording
+- **Akses**: `ORGANIZER` (Lead Organizer atau Co-Organizer pada event berstatus `DUAL_CHANNEL`).
+- **Endpoint**:
+  - `POST /api/ticket-types/:ticketTypeId/inventory/offline-sale`: Mencatat penjualan tiket fisik/on-the-spot pada kanal `OFFLINE`.
+    - **Input**:
+      ```json
+      {
+        "quantity": 5,
+        "notes": "Penjualan booth OTS Gate A"
+      }
+      ```
+    - **Aturan Bisnis**:
+      - Hanya berlaku untuk event dengan `inventory_mode == "DUAL_CHANNEL"`.
+      - Menggunakan `SELECT ... FOR UPDATE` pada baris `inventories` (`channel = "OFFLINE"`). Jika `sold + quantity > quota`, tolak dengan `422 Unprocessable Entity`.
+
+---
+
+### FD-6.0: Order, Checkout, Payment Webhook & E-Ticket (QR) Lifecycle
+
+*(Catatan: Seluruh tabel finansial dan transaksional pada modul ini — `orders`, `order_items`, `payments`, `tickets` — bersifat **Append-Only / No Delete**).*
+
+#### F-6.1 Ticket Checkout & Inventory Reservation
+- **Akses**: `USER` (Pengguna terautentikasi).
+- **Endpoint**:
+  - `POST /api/orders/checkout`: Membuat pesanan tiket baru dan menahan (*reserve*) kuota selama **15 menit**.
+- **Headers Wajib**:
+  - `Idempotency-Key`: string unik (UUID) yang disimpan di Redis untuk mencegah *duplicate order* akibat klik ganda atau *network retry*.
+- **Input**:
+  ```json
+  {
+    "items": [
+      {
+        "ticketTypeId": "uuid-ticket-type",
+        "pricingPhaseId": "uuid-pricing-phase",
+        "quantity": 2
+      }
+    ],
+    "paymentMethod": "QRIS"
+  }
+  ```
+- **Aturan Bisnis & Concurrency Control**:
+  1. Event wajib berstatus `PUBLISHED`, dan `pricing_phase` yang dipilih wajib sedang berada dalam rentang waktu aktif (`start_at <= now() <= end_at`).
+  2. Membuka transaksi database (`tx`) dan mengunci baris `inventories` (`channel = "ONLINE"`) serta `pricing_phases` menggunakan **`SELECT ... FOR UPDATE`** untuk mencegah *race condition / overselling*.
+  3. Validasi ketersediaan kuota:
+     - `inventories.sold + inventories.reserved + quantity <= inventories.quota`
+     - `pricing_phases.sold + quantity <= pricing_phases.quota`
+     - Jika kuota tidak mencukupi, batalkan transaksi dan kembalikan `422 Unprocessable Entity`.
+  4. Tambahkan `inventories.reserved += quantity`.
+  5. Simpan snapshot transaksi ke tabel `orders` (`status = "PENDING"`, `total_amount` tipe `NUMERIC(15, 2)`, `expires_at = now() + 15 minutes`), `order_items` (`unit_price` dan `subtotal` immutable), serta `payments` (`status = "PENDING"`).
+
+#### F-6.2 Order History, Detail & Reservation Expiry Release
+- **Akses**: `USER` (Pemilik pesanan) dan `ADMIN`/`SUPER_ADMIN`.
+- **Endpoint**:
+  - `GET /api/orders`: Riwayat pesanan pengguna yang sedang login (mendukung `BaseListParams` + filter `status`).
+  - `GET /api/orders/:id`: Detail pesanan beserta rincian `order_items`, status `payments`, dan daftar `tickets` (termasuk `qrToken` jika pesanan sudah `PAID`).
+  - `POST /api/orders/:id/cancel`: Membatalkan pesanan yang masih berstatus `PENDING` secara mandiri.
+- **Aturan Bisnis Expiration (TTL 15 Menit)**:
+  - Jika pesanan `PENDING` telah melewati `expires_at` (atau dibatalkan pengguna), status `orders` dan `payments` diubah menjadi `EXPIRED` / `CANCELLED`, dan kuota yang ditahan dikembalikan ke `inventories` (`inventories.reserved -= quantity`) di dalam transaksi database.
+
+#### F-6.3 Payment Webhook & E-Ticket (QR) Generation
+- **Akses**: Publik / Payment Gateway Callback (Dilindungi verifikasi signature token provider).
+- **Endpoint**:
+  - `POST /api/payments/webhook`: Menerima notifikasi status pembayaran dari Payment Gateway (Midtrans Sandbox / Mock Provider).
+- **Aturan Bisnis**:
+  - **Idempotent**: Jika `orders.status` sudah `PAID`, abaikan pemrosesan ulang dan langsung kembalikan `200 OK`.
+  - Jika status pembayaran sukses (`PAID` / `SETTLEMENT`):
+    1. Dalam 1 transaksi database (`SELECT ... FOR UPDATE`): ubah `payments.status = "PAID"`, `payments.paid_at = now()`, dan `orders.status = "PAID"`.
+    2. Finalisasi kuota pada `inventories` (`channel = "ONLINE"`): `reserved -= quantity` dan `sold += quantity`, serta tambahkan `pricing_phases.sold += quantity`.
+    3. **Generate E-Ticket (`tickets`)**: Buat record tiket individu sebanyak total `quantity` pada `order_items` dengan `status = "ISSUED"`, `ticket_code` unik, dan `qr_token` yang dienkripsi menggunakan **AES-256-GCM** (memuat payload JSON terenkripsi: `ticketId`, `orderId`, `eventId`).
+    4. Kirim email bukti pembayaran & e-ticket ke `orders.buyer_email`.
+  - Jika status pembayaran gagal/kedaluwarsa (`EXPIRED` / `FAILED`) dan pesanan masih `PENDING`: ubah status menjadi `EXPIRED` dan lepaskan `inventories.reserved -= quantity`.
+
+#### F-6.4 Gate Check-In & QR Ticket Validation
+- **Akses**: `ORGANIZER` (Lead Organizer & Co-Organizer) dan `STAFF` yang ditugaskan pada event terkait di tabel `event_organizers`.
+- **Endpoint**:
+  - `POST /api/events/:eventId/tickets/check-in`: Memindai dan memvalidasi QR e-ticket penonton di gerbang masuk (*gate*).
+- **Input**:
+  ```json
+  {
+    "qrToken": "aes-256-gcm-encrypted-base64-string"
+  }
+  ```
+- **Aturan Bisnis**:
+  1. Verifikasi bahwa pemindai (`actor`) adalah Lead Organizer (`events.organizer_id`) atau terdaftar di `event_organizers` untuk `eventId` tersebut. Jika bukan, tolak dengan `403 Forbidden`.
+  2. Dekripsi `qrToken` menggunakan **AES-256-GCM**. Jika gagal didekripsi atau `eventId` di dalam payload tidak cocok dengan `:eventId` pada URL, tolak dengan `400 Bad Request` ("Tiket tidak valid atau palsu").
+  3. Kunci baris `tickets` dengan `SELECT ... FOR UPDATE`:
+     - Jika `tickets.status == "USED"`, tolak dengan `409 Conflict` beserta waktu `checked_in_at` sebelumnya ("Tiket sudah digunakan").
+     - Jika `tickets.status == "ISSUED"`, ubah status menjadi `USED`, set `checked_in_at = now()`, dan kembalikan detail pemilik tiket serta kategori tiket (`200 OK`).
