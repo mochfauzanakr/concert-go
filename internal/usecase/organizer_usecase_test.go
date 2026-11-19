@@ -23,7 +23,7 @@ func TestOrganizerUsecase_UpsertProfile(t *testing.T) {
 	sessionRepo := mock.NewSessionRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, nil, storageService, nil)
 
 	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	organizerID := uuid.New()
@@ -115,7 +115,7 @@ func TestOrganizerUsecase_GetProfile(t *testing.T) {
 	sessionRepo := mock.NewSessionRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, nil, storageService, nil)
 
 	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	organizerID := uuid.New()
@@ -164,7 +164,7 @@ func TestOrganizerUsecase_GetPublicProfile(t *testing.T) {
 	sessionRepo := mock.NewSessionRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, nil, storageService, nil)
 
 	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	organizerID := uuid.New()
@@ -230,7 +230,7 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 	sessionRepo := mock.NewSessionRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, nil, storageService, nil)
 
 	staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
 	organizerA := uuid.New()
@@ -320,7 +320,7 @@ func TestOrganizerUsecase_UpdateStaffStatus(t *testing.T) {
 	sessionRepo := mock.NewSessionRepositoryMock()
 	storageService := &mockStorageService{}
 
-	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, storageService)
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, nil, storageService, nil)
 
 	staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
 	userRole, _ := roleRepo.FindByName(ctx, "USER")
@@ -418,6 +418,161 @@ func TestOrganizerUsecase_UpdateStaffStatus(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatal("expected bad request error for invalid status")
+		}
+	})
+}
+
+func TestOrganizerUsecase_PartnershipApplicationFlow(t *testing.T) {
+	ctx := context.Background()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
+	userRepo := mock.NewUserRepositoryMock()
+	inviteRepo := mock.NewInviteRepositoryMock()
+	roleRepo := mock.NewRoleRepositoryMock()
+	sessionRepo := mock.NewSessionRepositoryMock()
+	emailSender := &mockEmailSender{}
+	storageService := &mockStorageService{}
+
+	uc := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, emailSender, storageService, nil)
+
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
+	_ = userRepo.Create(ctx, &entity.User{
+		ID:     uuid.New(),
+		RoleID: &userRole.ID,
+		Name:   "Existing User",
+		Email:  "existing@example.com",
+		Status: entity.UserStatusActive,
+	})
+
+	t.Run("validation errors on apply", func(t *testing.T) {
+		_, err := uc.ApplyForPartnership(ctx, request.ApplyOrganizerRequest{
+			PicName:     "A",
+			Email:       "lead@JavaJazz.com",
+			Phone:       "081234567890",
+			OrgName:     "Java Jazz Production",
+			Description: "Annual international jazz festival organizer",
+		})
+		if err == nil {
+			t.Fatal("expected validation error for short picName")
+		}
+	})
+
+	t.Run("reject apply if email already registered as user", func(t *testing.T) {
+		_, err := uc.ApplyForPartnership(ctx, request.ApplyOrganizerRequest{
+			PicName:     "John Doe",
+			Email:       "existing@example.com",
+			Phone:       "081234567890",
+			OrgName:     "Existing Org",
+			Description: "Valid description with more than ten chars",
+		})
+		if err == nil {
+			t.Fatal("expected conflict error when email is already registered")
+		}
+	})
+
+	var pendingAppID uuid.UUID
+	t.Run("success submit application and reject duplicate pending", func(t *testing.T) {
+		res, err := uc.ApplyForPartnership(ctx, request.ApplyOrganizerRequest{
+			PicName:     "Dewi Gontha",
+			Email:       "partner@javajazz.com",
+			Phone:       "081122334455",
+			OrgName:     "Java Festival Production",
+			SocialMedia: "https://instagram.com/javajazzfest",
+			Description: "Leading music festival promoter in Indonesia.",
+		})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if res.Status != entity.ApplicationStatusPending {
+			t.Errorf("expected status PENDING, got %s", res.Status)
+		}
+		pendingAppID = res.ID
+
+		// Duplicate pending submission for same email must fail with 409
+		_, err = uc.ApplyForPartnership(ctx, request.ApplyOrganizerRequest{
+			PicName:     "Dewi Gontha",
+			Email:       "partner@javajazz.com",
+			Phone:       "081122334455",
+			OrgName:     "Java Festival Production",
+			Description: "Duplicate pending submission test.",
+		})
+		if err == nil {
+			t.Fatal("expected conflict error for duplicate pending application")
+		}
+	})
+
+	t.Run("admin lists applications with search and status filter", func(t *testing.T) {
+		pageRes, err := uc.GetApplications(ctx, request.GetOrganizerApplicationListRequest{
+			Page:     1,
+			PageSize: 10,
+			Search:   "Java Festival",
+			Status:   "PENDING",
+		})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if len(pageRes.Items) != 1 || pageRes.Items[0].ID != pendingAppID {
+			t.Fatalf("expected 1 matching application, got %+v", pageRes.Items)
+		}
+	})
+
+	t.Run("admin approves application and triggers organizer invite", func(t *testing.T) {
+		adminID := uuid.New()
+		res, err := uc.ReviewApplication(ctx, adminID, pendingAppID, request.ReviewOrganizerApplicationRequest{
+			Status: "APPROVED",
+		})
+		if err != nil {
+			t.Fatalf("expected approval success, got %v", err)
+		}
+		if res.Status != entity.ApplicationStatusApproved {
+			t.Errorf("expected status APPROVED, got %s", res.Status)
+		}
+		if res.ReviewedBy == nil || *res.ReviewedBy != adminID {
+			t.Errorf("expected reviewedBy %s, got %v", adminID, res.ReviewedBy)
+		}
+
+		inv, err := inviteRepo.FindPendingByEmail(ctx, "partner@javajazz.com")
+		if err != nil || inv == nil {
+			t.Fatalf("expected pending ORGANIZER invite to be created, got inv=%v err=%v", inv, err)
+		}
+
+		// Cannot review an already reviewed application
+		_, err = uc.ReviewApplication(ctx, adminID, pendingAppID, request.ReviewOrganizerApplicationRequest{
+			Status: "REJECTED",
+		})
+		if err == nil {
+			t.Fatal("expected conflict error when reviewing already reviewed application")
+		}
+	})
+
+	t.Run("admin rejects application with reason and no invite created", func(t *testing.T) {
+		app2, err := uc.ApplyForPartnership(ctx, request.ApplyOrganizerRequest{
+			PicName:     "Fake Promoter",
+			Email:       "rejectme@example.com",
+			Phone:       "089988776655",
+			OrgName:     "Unknown EO",
+			Description: "Testing rejection workflow with reason.",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error on apply: %v", err)
+		}
+
+		res, err := uc.ReviewApplication(ctx, uuid.New(), app2.ID, request.ReviewOrganizerApplicationRequest{
+			Status:          "REJECTED",
+			RejectionReason: "Incomplete portfolio link",
+		})
+		if err != nil {
+			t.Fatalf("expected rejection success, got %v", err)
+		}
+		if res.Status != entity.ApplicationStatusRejected {
+			t.Errorf("expected status REJECTED, got %s", res.Status)
+		}
+		if res.RejectionReason == nil || *res.RejectionReason != "Incomplete portfolio link" {
+			t.Errorf("expected rejectionReason to be saved, got %v", res.RejectionReason)
+		}
+
+		inv, _ := inviteRepo.FindPendingByEmail(ctx, "rejectme@example.com")
+		if inv != nil {
+			t.Fatal("expected no invite to be created for rejected application")
 		}
 	})
 }

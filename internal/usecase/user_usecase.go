@@ -191,9 +191,27 @@ func (u *UserUsecase) AcceptInvite(ctx context.Context, req request.AcceptInvite
 	}
 
 	if u.organizerRepo != nil && u.roleRepo != nil {
-		if role, err := u.roleRepo.FindByID(ctx, invite.RoleID); err == nil && role != nil && strings.EqualFold(role.Name, "STAFF") {
-			if err := u.organizerRepo.AddStaff(ctx, invite.InvitedBy, user.ID); err != nil {
-				return nil, err
+		if role, err := u.roleRepo.FindByID(ctx, invite.RoleID); err == nil && role != nil {
+			switch strings.ToUpper(role.Name) {
+			case "STAFF":
+				if err := u.organizerRepo.AddStaff(ctx, invite.InvitedBy, user.ID); err != nil {
+					return nil, err
+				}
+			case "ORGANIZER":
+				if app, err := u.organizerRepo.FindLatestApplicationByEmail(ctx, invite.Email); err == nil && app != nil && app.Status == entity.ApplicationStatusApproved {
+					desc := app.Description
+					phone := app.Phone
+					profile := &entity.OrganizerProfile{
+						UserID:      user.ID,
+						OrgName:     app.OrgName,
+						Description: &desc,
+						Phone:       &phone,
+						SocialMedia: app.SocialMedia,
+					}
+					if err := u.organizerRepo.Upsert(ctx, profile); err != nil {
+						return nil, err
+					}
+				}
 			}
 		}
 	}

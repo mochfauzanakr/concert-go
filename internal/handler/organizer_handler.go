@@ -153,3 +153,77 @@ func (h *OrganizerHandler) UpdateStaffStatus(c *gin.Context) {
 
 	util.RespondOK(c, "Staff status updated successfully", res, nil)
 }
+
+func (h *OrganizerHandler) ApplyForPartnership(c *gin.Context) {
+	var req request.ApplyOrganizerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	res, err := h.organizerUsecase.ApplyForPartnership(c.Request.Context(), req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondCreated(c, "Organizer application submitted successfully", res)
+}
+
+func (h *OrganizerHandler) GetApplications(c *gin.Context) {
+	page := util.ParseQueryInt(c, "page", 1)
+	pageSize := util.ParseQueryInt(c, "pageSize", 10)
+	if c.Query("pageSize") == "" && c.Query("limit") != "" {
+		pageSize = util.ParseQueryInt(c, "limit", 10)
+	}
+
+	search := strings.TrimSpace(c.Query("search"))
+	if search == "" {
+		search = strings.TrimSpace(c.Query("searchQuery"))
+	}
+	status := strings.TrimSpace(c.Query("status"))
+
+	req := request.GetOrganizerApplicationListRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Search:   search,
+		Status:   status,
+	}
+
+	res, err := h.organizerUsecase.GetApplications(c.Request.Context(), req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Organizer applications fetched successfully", res.Items, &res.Pagination)
+}
+
+func (h *OrganizerHandler) ReviewApplication(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	idStr := c.Param("id")
+	appID, err := uuid.Parse(idStr)
+	if err != nil {
+		util.RespondBadRequest(c, "Invalid application ID format", err.Error())
+		return
+	}
+
+	var req request.ReviewOrganizerApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	res, err := h.organizerUsecase.ReviewApplication(c.Request.Context(), session.UserID, appID, req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Organizer application reviewed successfully", res, nil)
+}

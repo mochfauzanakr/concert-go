@@ -24,3 +24,24 @@ type OrganizerStaff struct {
 	UserID      uuid.UUID `gorm:"column:user_id;type:uuid;uniqueIndex:idx_organizer_staff;not null" json:"userId"`
 	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 }
+
+const (
+	ApplicationStatusPending  = "PENDING"
+	ApplicationStatusApproved = "APPROVED"
+	ApplicationStatusRejected = "REJECTED"
+)
+
+type OrganizerApplication struct {
+	ID              uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	PicName         string     `gorm:"column:pic_name;type:varchar(100);not null" json:"picName"`
+	Email           string     `gorm:"column:email;type:varchar(150);index;not null" json:"email"`
+	Phone           string     `gorm:"column:phone;type:varchar(20);not null" json:"phone"`
+	OrgName         string     `gorm:"column:org_name;type:varchar(100);not null" json:"orgName"`
+	SocialMedia     *string    `gorm:"column:social_media;type:varchar(255)" json:"socialMedia,omitempty"`
+	Description     string     `gorm:"column:description;type:text;not null" json:"description"`
+	Status          string     `gorm:"column:status;type:varchar(20);default:'PENDING';not null" json:"status"`
+	RejectionReason *string    `gorm:"column:rejection_reason;type:text" json:"rejectionReason,omitempty"`
+	ReviewedBy      *uuid.UUID `gorm:"column:reviewed_by;type:uuid" json:"reviewedBy,omitempty"`
+	ReviewedAt      *time.Time `gorm:"column:reviewed_at" json:"reviewedAt,omitempty"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+}

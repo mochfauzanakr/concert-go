@@ -2,6 +2,8 @@ package mock
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,13 +29,15 @@ func isMockOrganizerStaff(organizerID, userID uuid.UUID) bool {
 }
 
 type organizerRepositoryMock struct {
-	mu       sync.RWMutex
-	profiles map[uuid.UUID]*entity.OrganizerProfile
+	mu           sync.RWMutex
+	profiles     map[uuid.UUID]*entity.OrganizerProfile
+	applications map[uuid.UUID]*entity.OrganizerApplication
 }
 
 func NewOrganizerRepositoryMock() repository.OrganizerRepository {
 	return &organizerRepositoryMock{
-		profiles: make(map[uuid.UUID]*entity.OrganizerProfile),
+		profiles:     make(map[uuid.UUID]*entity.OrganizerProfile),
+		applications: make(map[uuid.UUID]*entity.OrganizerApplication),
 	}
 }
 
@@ -103,4 +107,110 @@ func (m *organizerRepositoryMock) AddStaff(ctx context.Context, organizerID, use
 
 func (m *organizerRepositoryMock) IsStaffOfOrganizer(ctx context.Context, organizerID, userID uuid.UUID) (bool, error) {
 	return isMockOrganizerStaff(organizerID, userID), nil
+}
+
+func (m *organizerRepositoryMock) CreateApplication(ctx context.Context, app *entity.OrganizerApplication) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if app.ID == uuid.Nil {
+		app.ID = uuid.New()
+	}
+	if app.CreatedAt.IsZero() {
+		app.CreatedAt = time.Now()
+	}
+	if app.Status == "" {
+		app.Status = entity.ApplicationStatusPending
+	}
+
+	copyApp := *app
+	m.applications[app.ID] = &copyApp
+	return nil
+}
+
+func (m *organizerRepositoryMock) FindApplicationByID(ctx context.Context, id uuid.UUID) (*entity.OrganizerApplication, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if app, exists := m.applications[id]; exists {
+		copyApp := *app
+		return &copyApp, nil
+	}
+	return nil, nil
+}
+
+func (m *organizerRepositoryMock) FindLatestApplicationByEmail(ctx context.Context, email string) (*entity.OrganizerApplication, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var latest *entity.OrganizerApplication
+	for _, app := range m.applications {
+		if strings.EqualFold(app.Email, email) {
+			if latest == nil || !app.CreatedAt.Before(latest.CreatedAt) {
+				copyApp := *app
+				latest = &copyApp
+			}
+		}
+	}
+	return latest, nil
+}
+
+func (m *organizerRepositoryMock) FindAllApplications(ctx context.Context, filter repository.OrganizerApplicationFilter) ([]*entity.OrganizerApplication, int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	searchLower := strings.ToLower(strings.TrimSpace(filter.Search))
+	var filtered []*entity.OrganizerApplication
+
+	for _, app := range m.applications {
+		if filter.Status != "" && !strings.EqualFold(app.Status, filter.Status) {
+			continue
+		}
+		if searchLower != "" {
+			matchPic := strings.Contains(strings.ToLower(app.PicName), searchLower)
+			matchEmail := strings.Contains(strings.ToLower(app.Email), searchLower)
+			matchOrg := strings.Contains(strings.ToLower(app.OrgName), searchLower)
+			if !matchPic && !matchEmail && !matchOrg {
+				continue
+			}
+		}
+		copyApp := *app
+		filtered = append(filtered, &copyApp)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	total := len(filtered)
+	offset := filter.Offset
+	if offset >= total {
+		return []*entity.OrganizerApplication{}, total, nil
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	return filtered[offset:end], total, nil
+}
+
+func (m *organizerRepositoryMock) UpdateApplicationReview(ctx context.Context, app *entity.OrganizerApplication) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, exists := m.applications[app.ID]
+	if !exists {
+		return nil
+	}
+	existing.Status = app.Status
+	existing.RejectionReason = app.RejectionReason
+	existing.ReviewedBy = app.ReviewedBy
+	existing.ReviewedAt = app.ReviewedAt
+	return nil
 }

@@ -34,12 +34,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	otpRepo := redis.NewOTPRepository(config.RedisClient)
 	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
 	storageService := util.NewStorageService(cfg)
+	rateLimiter := util.NewRedisRateLimitStore(config.RedisClient)
 
 	helloUsecase := usecase.NewHelloUsecase(helloRepo)
 	roleUsecase := usecase.NewRoleUsecase(roleRepo)
 	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, emailSender, storageService, cfg)
-	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, storageService)
+	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, emailSender, storageService, cfg)
 
 	helloHandler := handler.NewHelloHandler(helloUsecase)
 	roleHandler := handler.NewRoleHandler(roleUsecase)
@@ -53,7 +54,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		AuthRoute(api, authHandler, cfg.JWTSecret)
 		RoleRoute(api, roleHandler)
 		UserRoute(api, userHandler, cfg.JWTSecret, roleRepo)
-		OrganizerRoute(api, organizerHandler, cfg.JWTSecret, roleRepo)
+		OrganizerRoute(api, organizerHandler, cfg.JWTSecret, roleRepo, rateLimiter)
 
 		// TODO: delete it in when it goes to main
 		DevRoute(api, cfg)

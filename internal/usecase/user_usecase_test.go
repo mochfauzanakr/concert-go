@@ -274,6 +274,56 @@ func TestUserUsecase_AcceptInvite(t *testing.T) {
 			t.Fatalf("expected staff to be linked in organizer_staffs, got isStaff=%v err=%v", isStaff, err)
 		}
 	})
+
+	t.Run("success ORGANIZER activation from approved application auto-creates organizer_profiles", func(t *testing.T) {
+		orgAppEmail := "approved-eo@example.com"
+		social := "https://instagram.com/approvedeo"
+		_ = organizerRepo.CreateApplication(ctx, &entity.OrganizerApplication{
+			ID:          uuid.New(),
+			PicName:     "Budi EO",
+			Email:       orgAppEmail,
+			Phone:       "081234567899",
+			OrgName:     "Nusantara Live Music",
+			SocialMedia: &social,
+			Description: "Promotor konser musik nasional",
+			Status:      entity.ApplicationStatusApproved,
+		})
+
+		orgToken := "valid-approved-org-token-777"
+		_ = inviteRepo.Create(ctx, &entity.Invite{
+			ID:        uuid.New(),
+			Email:     orgAppEmail,
+			RoleID:    organizerRole.ID,
+			InvitedBy: uuid.New(),
+			TokenHash: util.HashToken(orgToken),
+			Status:    entity.InviteStatusPending,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+
+		orgUserRes, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           orgToken,
+			Name:            "Budi EO",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err != nil {
+			t.Fatalf("expected organizer activation success, got %v", err)
+		}
+
+		profile, err := organizerRepo.FindByUserID(ctx, orgUserRes.ID)
+		if err != nil || profile == nil {
+			t.Fatalf("expected organizer_profiles to be auto-initialized from approved application, got profile=%v err=%v", profile, err)
+		}
+		if profile.OrgName != "Nusantara Live Music" {
+			t.Errorf("expected OrgName 'Nusantara Live Music', got %s", profile.OrgName)
+		}
+		if profile.Phone == nil || *profile.Phone != "081234567899" {
+			t.Errorf("expected Phone '081234567899', got %v", profile.Phone)
+		}
+		if profile.Description == nil || *profile.Description != "Promotor konser musik nasional" {
+			t.Errorf("expected Description 'Promotor konser musik nasional', got %v", profile.Description)
+		}
+	})
 }
 
 func TestUserUsecase_ValidateInvite(t *testing.T) {
