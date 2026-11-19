@@ -8,6 +8,7 @@ import (
 
 	"concert-go/internal/config"
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/repository/mock"
 	"concert-go/internal/usecase"
@@ -466,8 +467,10 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 
 	t.Run("all users pagination", func(t *testing.T) {
 		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
-			Page:     1,
-			PageSize: 2,
+			BaseListParams: model.BaseListParams{
+				Page:     1,
+				PageSize: 2,
+			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -488,7 +491,9 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 
 	t.Run("filter by search", func(t *testing.T) {
 		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
-			Search: "alice",
+			BaseListParams: model.BaseListParams{
+				Search: "alice",
+			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)

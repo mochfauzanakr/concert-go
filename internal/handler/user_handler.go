@@ -102,18 +102,6 @@ func (h *UserHandler) GetUserDetail(c *gin.Context) {
 }
 
 func (h *UserHandler) GetAllUsers(c *gin.Context) {
-	page := util.ParseQueryInt(c, "page", 1)
-	pageSize := util.ParseQueryInt(c, "pageSize", 10)
-	if c.Query("pageSize") == "" && c.Query("limit") != "" {
-		pageSize = util.ParseQueryInt(c, "limit", 10)
-	}
-
-	search := strings.TrimSpace(c.Query("search"))
-	if search == "" {
-		search = strings.TrimSpace(c.Query("searchQuery"))
-	}
-	status := strings.TrimSpace(c.Query("status"))
-
 	var roleID *int
 	if rawRole := strings.TrimSpace(c.Query("roleId")); rawRole != "" {
 		if id, err := strconv.Atoi(rawRole); err == nil {
@@ -122,11 +110,9 @@ func (h *UserHandler) GetAllUsers(c *gin.Context) {
 	}
 
 	req := request.GetUserListRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   search,
-		RoleID:   roleID,
-		Status:   status,
+		BaseListParams: util.ParseBaseListParams(c),
+		RoleID:         roleID,
+		Status:         strings.TrimSpace(c.Query("status")),
 	}
 
 	res, err := h.userUsecase.GetAllUsers(c.Request.Context(), req)

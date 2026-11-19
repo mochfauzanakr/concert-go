@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"concert-go/internal/domain/entity"
 
@@ -13,6 +14,10 @@ type UserFilter struct {
 	RoleID      *int
 	Status      string
 	OrganizerID *uuid.UUID
+	StartDate   *time.Time
+	EndDate     *time.Time
+	SortBy      string
+	SortOrder   string
 	Limit       int
 	Offset      int
 }

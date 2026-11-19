@@ -282,28 +282,18 @@ func (u *UserUsecase) GetUserDetail(ctx context.Context, id uuid.UUID) (*respons
 }
 
 func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRequest) (*response.PageResponse[response.UserListItemResponse], error) {
-	page := req.Page
-	if page <= 0 {
-		page = 1
-	}
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 10
-	}
-	if pageSize > 20 {
-		pageSize = 20
-	}
-
-	search := strings.TrimSpace(req.Search)
-	status := strings.ToUpper(strings.TrimSpace(req.Status))
-	offset := model.CalculateOffset(page, pageSize)
+	req.Normalize(20)
 
 	filter := repository.UserFilter{
-		Search: search,
-		RoleID: req.RoleID,
-		Status: status,
-		Limit:  pageSize,
-		Offset: offset,
+		Search:    req.Search,
+		RoleID:    req.RoleID,
+		Status:    strings.ToUpper(strings.TrimSpace(req.Status)),
+		StartDate: req.StartDate,
+		EndDate:   req.EndDate,
+		SortBy:    req.SortBy,
+		SortOrder: req.SortOrder,
+		Limit:     req.PageSize,
+		Offset:    model.CalculateOffset(req.Page, req.PageSize),
 	}
 
 	users, total, err := u.userRepo.FindAll(ctx, filter)
@@ -324,7 +314,7 @@ func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRe
 		})
 	}
 
-	pagination := model.BuildPagination(total, page, pageSize)
+	pagination := model.BuildPagination(total, req.Page, req.PageSize)
 
 	return &response.PageResponse[response.UserListItemResponse]{
 		Items:      items,
