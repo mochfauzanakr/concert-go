@@ -124,6 +124,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 - **Aturan Bisnis**:
   - Validasi token invite (apakah valid dan belum expired).
   - Jika valid, akun diaktifkan dengan role yang telah ditentukan saat diundang.
+  - Khusus untuk undangan dengan role `STAFF`, sistem otomatis mencatat relasi antara organizer pengundang (`invites.invited_by`) dan staf baru (`users.id`) ke tabel `organizer_staffs`.
   - Token invite ditandai sebagai `ACCEPTED` (tidak bisa digunakan ulang).
 
 #### F-2.4 User Detail & Status Management (Suspend / Reactivate)
@@ -186,7 +187,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
 #### F-3.2 Staff Management (Organizer-scoped)
 - **Akses**: `ORGANIZER`.
 - **Prinsip**: Terisolasi per-organizer. Organizer hanya dapat mengundang, melihat, dan mengelola status staf yang mereka rekrut sendiri melalui tautan undangan.
-- **Mekanisme Pelacakan**: Staf terasosiasi ke organizer melalui riwayat undangan di tabel `invites` (`invites.invited_by = current_organizer_id` dan `status = 'ACCEPTED'`).
+- **Mekanisme Pelacakan**: Staf terasosiasi ke organizer melalui tabel `organizer_staffs` (`organizer_staffs.organizer_id = current_organizer_id` dan `organizer_staffs.user_id = staff_user_id`) yang otomatis tercatat saat staf menyelesaikan `AcceptInvite`.
 - **Endpoint**:
   - `POST /api/users/invite`: Mengundang staf baru dengan role `STAFF` via email (mengikuti F-2.2).
   - `GET /api/organizers/staff`: Daftar seluruh staf yang berada di bawah naungan organizer yang sedang login (dengan query parameters: `page`, `pageSize`, `search`, `status`).
@@ -198,7 +199,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
   }
   ```
 - **Aturan Bisnis Status Staf**:
-  - Organizer hanya berhak mengubah status user dengan role `STAFF` yang memiliki catatan undangan `invites.invited_by = organizer_user_id`. Jika staf tersebut milik organizer lain, tolak dengan `403 Forbidden` / `404 Not Found`.
+  - Organizer hanya berhak mengubah status user dengan role `STAFF` yang terdaftar di bawah organisasinya pada tabel `organizer_staffs` (`organizer_staffs.organizer_id = organizer_user_id`). Jika staf tersebut milik organizer lain, tolak dengan `403 Forbidden` / `404 Not Found`.
   - Ketika staf di-suspend (`SUSPENDED`), seluruh sesi aktif staf tersebut di tabel `sessions` otomatis dicabut (*revoked*).
 - **Catatan Modul Event (FD-4.0)**:
   - Penugasan staf dan co-organizer ke event tertentu (`event_organizers`) didefinisikan pada modul Event Management (FD-4.0).
@@ -284,7 +285,7 @@ Response HTTP wajib menggunakan struktur JSON berikut (`GlobalResponse`):
       }
       ```
     - **Aturan Bisnis**:
-      - Jika `roleInEvent == "STAFF"`: Pengguna target wajib memiliki role `STAFF`, berstatus `ACTIVE`, dan merupakan staf yang direkrut oleh Lead Organizer tersebut (`invites.invited_by = lead_organizer_id`).
+      - Jika `roleInEvent == "STAFF"`: Pengguna target wajib memiliki role `STAFF`, berstatus `ACTIVE`, dan terdaftar sebagai staf milik Lead Organizer tersebut pada tabel `organizer_staffs` (`organizer_staffs.organizer_id = lead_organizer_id`).
       - Jika `roleInEvent == "CO_ORGANIZER"`: Pengguna target wajib memiliki role `ORGANIZER`, berstatus `ACTIVE`, dan bukan merupakan Lead Organizer itu sendiri.
       - Tolak dengan `409 Conflict` jika pengguna sudah terdaftar di tim event tersebut.
   - `DELETE /api/events/:eventId/team/:userId`: Mencopot (unassign) `CO_ORGANIZER` atau `STAFF` dari event tersebut.

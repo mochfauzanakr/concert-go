@@ -9,12 +9,12 @@ import (
 )
 
 type UserFilter struct {
-	Search string
-	RoleID *int
-	Status string
-	Emails []string
-	Limit  int
-	Offset int
+	Search      string
+	RoleID      *int
+	Status      string
+	OrganizerID *uuid.UUID
+	Limit       int
+	Offset      int
 }
 
 type UserRepository interface {

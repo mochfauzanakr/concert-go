@@ -11,6 +11,21 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	staffRegistryMu sync.RWMutex
+	staffRegistry   = make(map[uuid.UUID]map[uuid.UUID]struct{})
+)
+
+func isMockOrganizerStaff(organizerID, userID uuid.UUID) bool {
+	staffRegistryMu.RLock()
+	defer staffRegistryMu.RUnlock()
+	if set, ok := staffRegistry[organizerID]; ok {
+		_, exists := set[userID]
+		return exists
+	}
+	return false
+}
+
 type organizerRepositoryMock struct {
 	mu       sync.RWMutex
 	profiles map[uuid.UUID]*entity.OrganizerProfile
@@ -73,4 +88,19 @@ func (m *organizerRepositoryMock) Upsert(ctx context.Context, profile *entity.Or
 	copyProfile := *profile
 	m.profiles[profile.UserID] = &copyProfile
 	return nil
+}
+
+func (m *organizerRepositoryMock) AddStaff(ctx context.Context, organizerID, userID uuid.UUID) error {
+	staffRegistryMu.Lock()
+	defer staffRegistryMu.Unlock()
+
+	if staffRegistry[organizerID] == nil {
+		staffRegistry[organizerID] = make(map[uuid.UUID]struct{})
+	}
+	staffRegistry[organizerID][userID] = struct{}{}
+	return nil
+}
+
+func (m *organizerRepositoryMock) IsStaffOfOrganizer(ctx context.Context, organizerID, userID uuid.UUID) (bool, error) {
+	return isMockOrganizerStaff(organizerID, userID), nil
 }

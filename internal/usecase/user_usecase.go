@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log"
 	"mime/multipart"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type UserUsecase struct {
 	roleRepo       repository.RoleRepository
 	inviteRepo     repository.InviteRepository
 	sessionRepo    repository.SessionRepository
+	organizerRepo  repository.OrganizerRepository
 	emailSender    util.EmailSender
 	storageService util.StorageService
 	cfg            *config.Config
@@ -33,6 +35,7 @@ func NewUserUsecase(
 	roleRepo repository.RoleRepository,
 	inviteRepo repository.InviteRepository,
 	sessionRepo repository.SessionRepository,
+	organizerRepo repository.OrganizerRepository,
 	emailSender util.EmailSender,
 	storageService util.StorageService,
 	cfg *config.Config,
@@ -42,6 +45,7 @@ func NewUserUsecase(
 		roleRepo:       roleRepo,
 		inviteRepo:     inviteRepo,
 		sessionRepo:    sessionRepo,
+		organizerRepo:  organizerRepo,
 		emailSender:    emailSender,
 		storageService: storageService,
 		cfg:            cfg,
@@ -122,6 +126,7 @@ func (u *UserUsecase) InviteUser(ctx context.Context, inviterID uuid.UUID, invit
 		baseURL = strings.TrimRight(strings.TrimSpace(u.cfg.FrontendURL), "/")
 	}
 	inviteURL := baseURL + "/accept-invite?token=" + rawToken
+	log.Printf("[DEV] Invite URL (%s): %s | Token: %s", email, inviteURL, rawToken) // ponytail: stdout log for local testing; remove or gate by env before prod
 	if u.emailSender != nil {
 		if err := u.emailSender.SendInviteLink(email, targetRole.Name, inviteURL); err != nil {
 			return nil, exception.Internal("failed to send invitation email", err)
@@ -183,6 +188,14 @@ func (u *UserUsecase) AcceptInvite(ctx context.Context, req request.AcceptInvite
 
 	if err := u.userRepo.Create(ctx, user); err != nil {
 		return nil, err
+	}
+
+	if u.organizerRepo != nil && u.roleRepo != nil {
+		if role, err := u.roleRepo.FindByID(ctx, invite.RoleID); err == nil && role != nil && strings.EqualFold(role.Name, "STAFF") {
+			if err := u.organizerRepo.AddStaff(ctx, invite.InvitedBy, user.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	now := time.Now()

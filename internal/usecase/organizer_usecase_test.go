@@ -245,14 +245,7 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 		Email:  "alice@staff.com",
 		Status: entity.UserStatusActive,
 	})
-	_ = inviteRepo.Create(ctx, &entity.Invite{
-		ID:        uuid.New(),
-		Email:     "alice@staff.com",
-		RoleID:    staffRole.ID,
-		InvitedBy: organizerA,
-		TokenHash: "hash-alice",
-		Status:    entity.InviteStatusAccepted,
-	})
+	_ = organizerRepo.AddStaff(ctx, organizerA, staff1ID)
 
 	// Staff 2 invited by Organizer A (SUSPENDED)
 	staff2ID := uuid.New()
@@ -263,14 +256,7 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 		Email:  "bob@staff.com",
 		Status: entity.UserStatusSuspended,
 	})
-	_ = inviteRepo.Create(ctx, &entity.Invite{
-		ID:        uuid.New(),
-		Email:     "bob@staff.com",
-		RoleID:    staffRole.ID,
-		InvitedBy: organizerA,
-		TokenHash: "hash-bob",
-		Status:    entity.InviteStatusAccepted,
-	})
+	_ = organizerRepo.AddStaff(ctx, organizerA, staff2ID)
 
 	// Staff 3 invited by Organizer B (should not appear for Organizer A)
 	staff3ID := uuid.New()
@@ -281,14 +267,7 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 		Email:  "charlie@staff.com",
 		Status: entity.UserStatusActive,
 	})
-	_ = inviteRepo.Create(ctx, &entity.Invite{
-		ID:        uuid.New(),
-		Email:     "charlie@staff.com",
-		RoleID:    staffRole.ID,
-		InvitedBy: organizerB,
-		TokenHash: "hash-charlie",
-		Status:    entity.InviteStatusAccepted,
-	})
+	_ = organizerRepo.AddStaff(ctx, organizerB, staff3ID)
 
 	t.Run("returns only staff invited by current organizer", func(t *testing.T) {
 		res, err := uc.GetStaffList(ctx, organizerA, request.GetOrganizerStaffListRequest{
@@ -357,14 +336,7 @@ func TestOrganizerUsecase_UpdateStaffStatus(t *testing.T) {
 		Email:  "alice@staff.com",
 		Status: entity.UserStatusActive,
 	})
-	_ = inviteRepo.Create(ctx, &entity.Invite{
-		ID:        uuid.New(),
-		Email:     "alice@staff.com",
-		RoleID:    staffRole.ID,
-		InvitedBy: organizerA,
-		TokenHash: "hash-alice",
-		Status:    entity.InviteStatusAccepted,
-	})
+	_ = organizerRepo.AddStaff(ctx, organizerA, staffA)
 	_ = sessionRepo.Create(ctx, &entity.Session{
 		ID:        uuid.New(),
 		UserID:    staffA,
@@ -381,14 +353,7 @@ func TestOrganizerUsecase_UpdateStaffStatus(t *testing.T) {
 		Email:  "bob@staff.com",
 		Status: entity.UserStatusActive,
 	})
-	_ = inviteRepo.Create(ctx, &entity.Invite{
-		ID:        uuid.New(),
-		Email:     "bob@staff.com",
-		RoleID:    staffRole.ID,
-		InvitedBy: organizerB,
-		TokenHash: "hash-bob",
-		Status:    entity.InviteStatusAccepted,
-	})
+	_ = organizerRepo.AddStaff(ctx, organizerB, staffB)
 
 	// Regular user
 	regularUser := uuid.New()

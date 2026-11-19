@@ -17,3 +17,10 @@ type OrganizerProfile struct {
 	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updatedAt"`
 }
+
+type OrganizerStaff struct {
+	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	OrganizerID uuid.UUID `gorm:"column:organizer_id;type:uuid;uniqueIndex:idx_organizer_staff;not null" json:"organizerId"`
+	UserID      uuid.UUID `gorm:"column:user_id;type:uuid;uniqueIndex:idx_organizer_staff;not null" json:"userId"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+}

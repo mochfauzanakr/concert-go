@@ -90,18 +90,6 @@ func (m *userRepositoryMock) FindAll(ctx context.Context, filter repository.User
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if filter.Emails != nil && len(filter.Emails) == 0 {
-		return []*entity.User{}, 0, nil
-	}
-
-	var emailSet map[string]struct{}
-	if filter.Emails != nil {
-		emailSet = make(map[string]struct{}, len(filter.Emails))
-		for _, e := range filter.Emails {
-			emailSet[strings.ToLower(strings.TrimSpace(e))] = struct{}{}
-		}
-	}
-
 	var filtered []*entity.User
 	searchLower := strings.ToLower(strings.TrimSpace(filter.Search))
 
@@ -109,8 +97,8 @@ func (m *userRepositoryMock) FindAll(ctx context.Context, filter repository.User
 		if u.DeletedAt.Valid {
 			continue
 		}
-		if emailSet != nil {
-			if _, ok := emailSet[strings.ToLower(strings.TrimSpace(u.Email))]; !ok {
+		if filter.OrganizerID != nil {
+			if !isMockOrganizerStaff(*filter.OrganizerID, u.ID) {
 				continue
 			}
 		}

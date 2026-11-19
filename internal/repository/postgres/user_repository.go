@@ -145,17 +145,10 @@ func (r *userRepositoryImpl) FindAll(ctx context.Context, filter repository.User
 		argIdx++
 	}
 
-	if filter.Emails != nil {
-		if len(filter.Emails) == 0 {
-			return []*entity.User{}, 0, nil
-		}
-		placeholders := make([]string, len(filter.Emails))
-		for i, email := range filter.Emails {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, strings.ToLower(strings.TrimSpace(email)))
-			argIdx++
-		}
-		where = append(where, fmt.Sprintf("LOWER(email) IN (%s)", strings.Join(placeholders, ", ")))
+	if filter.OrganizerID != nil {
+		where = append(where, fmt.Sprintf("id IN (SELECT user_id FROM organizer_staffs WHERE organizer_id = $%d)", argIdx))
+		args = append(args, *filter.OrganizerID)
+		argIdx++
 	}
 
 	whereClause := strings.Join(where, " AND ")

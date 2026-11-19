@@ -165,17 +165,6 @@ func (u *OrganizerUsecase) GetStaffList(
 		pageSize = 20
 	}
 
-	emails, err := u.inviteRepo.FindAcceptedEmailsByInviter(ctx, organizerID)
-	if err != nil {
-		return nil, err
-	}
-	if len(emails) == 0 {
-		return &response.PageResponse[response.UserListItemResponse]{
-			Items:      []response.UserListItemResponse{},
-			Pagination: model.BuildPagination(0, page, pageSize),
-		}, nil
-	}
-
 	var staffRoleID *int
 	if u.roleRepo != nil {
 		if r, err := u.roleRepo.FindByName(ctx, "STAFF"); err == nil && r != nil {
@@ -184,12 +173,12 @@ func (u *OrganizerUsecase) GetStaffList(
 	}
 
 	filter := repository.UserFilter{
-		Search: strings.TrimSpace(req.Search),
-		RoleID: staffRoleID,
-		Status: strings.ToUpper(strings.TrimSpace(req.Status)),
-		Emails: emails,
-		Limit:  pageSize,
-		Offset: model.CalculateOffset(page, pageSize),
+		Search:      strings.TrimSpace(req.Search),
+		RoleID:      staffRoleID,
+		Status:      strings.ToUpper(strings.TrimSpace(req.Status)),
+		OrganizerID: &organizerID,
+		Limit:       pageSize,
+		Offset:      model.CalculateOffset(page, pageSize),
 	}
 
 	users, total, err := u.userRepo.FindAll(ctx, filter)
@@ -245,17 +234,9 @@ func (u *OrganizerUsecase) UpdateStaffStatus(
 		return nil, exception.Forbidden("target user is not a staff member")
 	}
 
-	emails, err := u.inviteRepo.FindAcceptedEmailsByInviter(ctx, organizerID)
+	owned, err := u.organizerRepo.IsStaffOfOrganizer(ctx, organizerID, staffID)
 	if err != nil {
 		return nil, err
-	}
-
-	owned := false
-	for _, email := range emails {
-		if strings.EqualFold(email, targetUser.Email) {
-			owned = true
-			break
-		}
 	}
 	if !owned {
 		return nil, exception.Forbidden("you do not have permission to manage this staff")

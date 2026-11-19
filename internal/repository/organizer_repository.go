@@ -12,4 +12,6 @@ type OrganizerRepository interface {
 	FindByUserID(ctx context.Context, userID uuid.UUID) (*entity.OrganizerProfile, error)
 	FindByIDOrUserID(ctx context.Context, id uuid.UUID) (*entity.OrganizerProfile, error)
 	Upsert(ctx context.Context, profile *entity.OrganizerProfile) error
+	AddStaff(ctx context.Context, organizerID, userID uuid.UUID) error
+	IsStaffOfOrganizer(ctx context.Context, organizerID, userID uuid.UUID) (bool, error)
 }

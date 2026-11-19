@@ -119,3 +119,20 @@ func (r *organizerRepositoryImpl) Upsert(ctx context.Context, profile *entity.Or
 
 	return nil
 }
+
+func (r *organizerRepositoryImpl) AddStaff(ctx context.Context, organizerID, userID uuid.UUID) error {
+	query := `
+		INSERT INTO organizer_staffs (id, organizer_id, user_id, created_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (organizer_id, user_id) DO NOTHING
+	`
+	_, err := r.db.ExecContext(ctx, query, uuid.New(), organizerID, userID, time.Now())
+	return err
+}
+
+func (r *organizerRepositoryImpl) IsStaffOfOrganizer(ctx context.Context, organizerID, userID uuid.UUID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM organizer_staffs WHERE organizer_id = $1 AND user_id = $2)`
+	var exists bool
+	err := r.db.QueryRowContext(ctx, query, organizerID, userID).Scan(&exists)
+	return exists, err
+}
