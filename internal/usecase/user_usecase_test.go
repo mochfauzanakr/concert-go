@@ -8,6 +8,7 @@ import (
 
 	"concert-go/internal/config"
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/repository/mock"
 	"concert-go/internal/usecase"
@@ -32,11 +33,12 @@ func setupUserUsecase() (*usecase.UserUsecase, *mockEmailSender) {
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
 	sessionRepo := mock.NewSessionRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, emailSender, storageService, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, emailSender, storageService, cfg)
 	return uc, emailSender
 }
 
@@ -47,7 +49,7 @@ func TestUserUsecase_InviteUser_Hierarchy(t *testing.T) {
 	superAdminID := 1
 	adminID := 2
 	organizerID := 3
-	buyerID := 4
+	userID := 4
 
 	inviterID := uuid.New()
 
@@ -124,7 +126,7 @@ func TestUserUsecase_InviteUser_Hierarchy(t *testing.T) {
 	})
 
 	t.Run("USER cannot invite anyone", func(t *testing.T) {
-		_, err := uc.InviteUser(ctx, inviterID, &buyerID, request.InviteUserRequest{
+		_, err := uc.InviteUser(ctx, inviterID, &userID, request.InviteUserRequest{
 			Email: "somebody@example.com",
 			Role:  "STAFF",
 		})
@@ -149,10 +151,11 @@ func TestUserUsecase_AcceptInvite(t *testing.T) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
 
 	rawToken := "valid-secret-token-12345"
 	tokenHash := util.HashToken(rawToken)
@@ -241,6 +244,87 @@ func TestUserUsecase_AcceptInvite(t *testing.T) {
 			t.Fatal("expected token to be consumed and rejected on second attempt")
 		}
 	})
+
+	t.Run("success STAFF activation registers organizer_staffs", func(t *testing.T) {
+		staffToken := "valid-staff-token-999"
+		staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
+		inviterOrganizerID := uuid.New()
+
+		_ = inviteRepo.Create(ctx, &entity.Invite{
+			ID:        uuid.New(),
+			Email:     "newstaff@example.com",
+			RoleID:    staffRole.ID,
+			InvitedBy: inviterOrganizerID,
+			TokenHash: util.HashToken(staffToken),
+			Status:    entity.InviteStatusPending,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+
+		staffRes, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           staffToken,
+			Name:            "New Staff",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err != nil {
+			t.Fatalf("expected staff activation success, got %v", err)
+		}
+
+		isStaff, err := organizerRepo.IsStaffOfOrganizer(ctx, inviterOrganizerID, staffRes.ID)
+		if err != nil || !isStaff {
+			t.Fatalf("expected staff to be linked in organizer_staffs, got isStaff=%v err=%v", isStaff, err)
+		}
+	})
+
+	t.Run("success ORGANIZER activation from approved application auto-creates organizer_profiles", func(t *testing.T) {
+		orgAppEmail := "approved-eo@example.com"
+		social := "https://instagram.com/approvedeo"
+		_ = organizerRepo.CreateApplication(ctx, &entity.OrganizerApplication{
+			ID:          uuid.New(),
+			PicName:     "Budi EO",
+			Email:       orgAppEmail,
+			Phone:       "081234567899",
+			OrgName:     "Nusantara Live Music",
+			SocialMedia: &social,
+			Description: "Promotor konser musik nasional",
+			Status:      entity.ApplicationStatusApproved,
+		})
+
+		orgToken := "valid-approved-org-token-777"
+		_ = inviteRepo.Create(ctx, &entity.Invite{
+			ID:        uuid.New(),
+			Email:     orgAppEmail,
+			RoleID:    organizerRole.ID,
+			InvitedBy: uuid.New(),
+			TokenHash: util.HashToken(orgToken),
+			Status:    entity.InviteStatusPending,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+
+		orgUserRes, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           orgToken,
+			Name:            "Budi EO",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err != nil {
+			t.Fatalf("expected organizer activation success, got %v", err)
+		}
+
+		profile, err := organizerRepo.FindByUserID(ctx, orgUserRes.ID)
+		if err != nil || profile == nil {
+			t.Fatalf("expected organizer_profiles to be auto-initialized from approved application, got profile=%v err=%v", profile, err)
+		}
+		if profile.OrgName != "Nusantara Live Music" {
+			t.Errorf("expected OrgName 'Nusantara Live Music', got %s", profile.OrgName)
+		}
+		if profile.Phone == nil || *profile.Phone != "081234567899" {
+			t.Errorf("expected Phone '081234567899', got %v", profile.Phone)
+		}
+		if profile.Description == nil || *profile.Description != "Promotor konser musik nasional" {
+			t.Errorf("expected Description 'Promotor konser musik nasional', got %v", profile.Description)
+		}
+	})
 }
 
 func TestUserUsecase_ValidateInvite(t *testing.T) {
@@ -248,10 +332,11 @@ func TestUserUsecase_ValidateInvite(t *testing.T) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
 
 	rawToken := "valid-token-for-check"
 	tokenHash := util.HashToken(rawToken)
@@ -300,10 +385,11 @@ func TestUserUsecase_GetUserDetail(t *testing.T) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
 
 	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	userID := uuid.New()
@@ -348,13 +434,14 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
 
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
-	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
 
 	_ = userRepo.Create(ctx, &entity.User{
 		Name:     "Alice Admin",
@@ -366,22 +453,24 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	_ = userRepo.Create(ctx, &entity.User{
 		Name:     "Bob Buyer",
 		Email:    "bob@example.com",
-		RoleID:   &buyerRole.ID,
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusActive,
 		Provider: "email",
 	})
 	_ = userRepo.Create(ctx, &entity.User{
 		Name:     "Charlie Suspended",
 		Email:    "charlie@example.com",
-		RoleID:   &buyerRole.ID,
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusSuspended,
 		Provider: "email",
 	})
 
 	t.Run("all users pagination", func(t *testing.T) {
 		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
-			Page:     1,
-			PageSize: 2,
+			BaseListParams: model.BaseListParams{
+				Page:     1,
+				PageSize: 2,
+			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -402,7 +491,9 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 
 	t.Run("filter by search", func(t *testing.T) {
 		pageRes, err := uc.GetAllUsers(ctx, request.GetUserListRequest{
-			Search: "alice",
+			BaseListParams: model.BaseListParams{
+				Search: "alice",
+			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -445,10 +536,11 @@ func TestUserUsecase_UpdateUserStatus(t *testing.T) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
 
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
@@ -574,15 +666,15 @@ func TestUserUsecase_UpdateProfile(t *testing.T) {
 	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, storageService, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), mock.NewOrganizerRepositoryMock(), emailSender, storageService, cfg)
 
-	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
 	userID := uuid.New()
 	_ = userRepo.Create(ctx, &entity.User{
 		ID:       userID,
 		Name:     "Old Name",
 		Email:    "profile@example.com",
-		RoleID:   &buyerRole.ID,
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusActive,
 		Provider: "email",
 	})
@@ -631,20 +723,21 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	userRepo := mock.NewUserRepositoryMock()
 	roleRepo := mock.NewRoleRepositoryMock()
 	inviteRepo := mock.NewInviteRepositoryMock()
+	organizerRepo := mock.NewOrganizerRepositoryMock()
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
 
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
 	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
-	buyerRole, _ := roleRepo.FindByName(ctx, "USER")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
 
 	superAdminID := uuid.New()
 	admin1ID := uuid.New()
 	admin2ID := uuid.New()
-	buyerID := uuid.New()
+	userID := uuid.New()
 
 	_ = userRepo.Create(ctx, &entity.User{
 		ID:       superAdminID,
@@ -671,10 +764,10 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 		Provider: "email",
 	})
 	_ = userRepo.Create(ctx, &entity.User{
-		ID:       buyerID,
+		ID:       userID,
 		Name:     "Buyer Bob",
-		Email:    "buyer@example.com",
-		RoleID:   &buyerRole.ID,
+		Email:    "user@example.com",
+		RoleID:   &userRole.ID,
 		Status:   entity.UserStatusActive,
 		Provider: "email",
 	})
@@ -682,7 +775,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	t.Run("cannot change own role", func(t *testing.T) {
 		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, admin1ID, request.AdminUpdateUserRequest{
 			Name:   "Admin 1 Renamed",
-			RoleID: buyerRole.ID,
+			RoleID: userRole.ID,
 		})
 		if err == nil {
 			t.Fatal("expected error on self role demotion/change")
@@ -700,7 +793,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	})
 
 	t.Run("ADMIN cannot promote to SUPER_ADMIN", func(t *testing.T) {
-		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, userID, request.AdminUpdateUserRequest{
 			Name:   "Buyer Promoted",
 			RoleID: superAdminRole.ID,
 		})
@@ -710,7 +803,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	})
 
 	t.Run("ADMIN cannot promote to ADMIN", func(t *testing.T) {
-		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+		_, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, userID, request.AdminUpdateUserRequest{
 			Name:   "Buyer Promoted To Admin",
 			RoleID: adminRole.ID,
 		})
@@ -719,8 +812,8 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 		}
 	})
 
-	t.Run("ADMIN can update BUYER to ORGANIZER", func(t *testing.T) {
-		res, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, buyerID, request.AdminUpdateUserRequest{
+	t.Run("ADMIN can update USER to ORGANIZER", func(t *testing.T) {
+		res, err := uc.AdminUpdateUser(ctx, admin1ID, &adminRole.ID, userID, request.AdminUpdateUserRequest{
 			Name:   "Buyer To Organizer",
 			RoleID: organizerRole.ID,
 		})

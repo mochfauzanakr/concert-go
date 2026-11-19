@@ -2,22 +2,26 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"concert-go/internal/domain/entity"
 
 	"github.com/google/uuid"
 )
 
-// UserFilter defines options for querying user lists
 type UserFilter struct {
-	Search string
-	RoleID *int
-	Status string
-	Limit  int
-	Offset int
+	Search      string
+	RoleID      *int
+	Status      string
+	OrganizerID *uuid.UUID
+	StartDate   *time.Time
+	EndDate     *time.Time
+	SortBy      string
+	SortOrder   string
+	Limit       int
+	Offset      int
 }
 
-// UserRepository contract for user data persistence
 type UserRepository interface {
 	Create(ctx context.Context, user *entity.User) error
 	Update(ctx context.Context, user *entity.User) error
