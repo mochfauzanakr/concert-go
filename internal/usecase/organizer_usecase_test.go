@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/domain/payload/request"
 	"concert-go/internal/repository/mock"
 	"concert-go/internal/usecase"
@@ -271,8 +272,10 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 
 	t.Run("returns only staff invited by current organizer", func(t *testing.T) {
 		res, err := uc.GetStaffList(ctx, organizerA, request.GetOrganizerStaffListRequest{
-			Page:     1,
-			PageSize: 10,
+			BaseListParams: model.BaseListParams{
+				Page:     1,
+				PageSize: 10,
+			},
 		})
 		if err != nil {
 			t.Fatalf("expected success, got %v", err)
@@ -284,10 +287,12 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 
 	t.Run("filters staff by search and status", func(t *testing.T) {
 		res, err := uc.GetStaffList(ctx, organizerA, request.GetOrganizerStaffListRequest{
-			Page:     1,
-			PageSize: 10,
-			Search:   "bob",
-			Status:   "SUSPENDED",
+			BaseListParams: model.BaseListParams{
+				Page:     1,
+				PageSize: 10,
+				Search:   "bob",
+			},
+			Status: "SUSPENDED",
 		})
 		if err != nil {
 			t.Fatalf("expected success, got %v", err)
@@ -299,8 +304,10 @@ func TestOrganizerUsecase_GetStaffList(t *testing.T) {
 
 	t.Run("returns empty list when organizer has no accepted invites", func(t *testing.T) {
 		res, err := uc.GetStaffList(ctx, uuid.New(), request.GetOrganizerStaffListRequest{
-			Page:     1,
-			PageSize: 10,
+			BaseListParams: model.BaseListParams{
+				Page:     1,
+				PageSize: 10,
+			},
 		})
 		if err != nil {
 			t.Fatalf("expected success, got %v", err)

@@ -162,17 +162,7 @@ func (u *OrganizerUsecase) GetStaffList(
 	organizerID uuid.UUID,
 	req request.GetOrganizerStaffListRequest,
 ) (*response.PageResponse[response.UserListItemResponse], error) {
-	page := req.Page
-	if page <= 0 {
-		page = 1
-	}
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 10
-	}
-	if pageSize > 20 {
-		pageSize = 20
-	}
+	req.Normalize(20)
 
 	var staffRoleID *int
 	if u.roleRepo != nil {
@@ -182,12 +172,16 @@ func (u *OrganizerUsecase) GetStaffList(
 	}
 
 	filter := repository.UserFilter{
-		Search:      strings.TrimSpace(req.Search),
+		Search:      req.Search,
 		RoleID:      staffRoleID,
 		Status:      strings.ToUpper(strings.TrimSpace(req.Status)),
 		OrganizerID: &organizerID,
-		Limit:       pageSize,
-		Offset:      model.CalculateOffset(page, pageSize),
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
+		SortBy:      req.SortBy,
+		SortOrder:   req.SortOrder,
+		Limit:       req.PageSize,
+		Offset:      model.CalculateOffset(req.Page, req.PageSize),
 	}
 
 	users, total, err := u.userRepo.FindAll(ctx, filter)
@@ -210,7 +204,7 @@ func (u *OrganizerUsecase) GetStaffList(
 
 	return &response.PageResponse[response.UserListItemResponse]{
 		Items:      items,
-		Pagination: model.BuildPagination(total, page, pageSize),
+		Pagination: model.BuildPagination(total, req.Page, req.PageSize),
 	}, nil
 }
 

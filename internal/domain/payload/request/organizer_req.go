@@ -1,5 +1,7 @@
 package request
 
+import "concert-go/internal/domain/model"
+
 type UpsertOrganizerProfileRequest struct {
 	OrgName     string `json:"orgName"`
 	Description string `json:"description"`
@@ -8,10 +10,8 @@ type UpsertOrganizerProfileRequest struct {
 }
 
 type GetOrganizerStaffListRequest struct {
-	Page     int
-	PageSize int
-	Search   string
-	Status   string
+	model.BaseListParams
+	Status string `json:"status"`
 }
 
 type ApplyOrganizerRequest struct {
