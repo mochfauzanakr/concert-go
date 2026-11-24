@@ -24,6 +24,17 @@ func RespondOK(c *gin.Context, message string, data interface{}, pagination *res
 	c.JSON(http.StatusOK, resp)
 }
 
+// RespondCreated formats a 201 response
+func RespondCreated(c *gin.Context, message string, data interface{}) {
+	resp := response.GlobalResponse{
+		Message: message,
+		Data:    data,
+		ReqID:   uuid.New().String(),
+		Status:  "T",
+	}
+	c.JSON(http.StatusCreated, resp)
+}
+
 // RespondBadRequest formats a 400 response
 func RespondBadRequest(c *gin.Context, message string, data interface{}) {
 	c.JSON(http.StatusBadRequest, response.ErrorResponse{

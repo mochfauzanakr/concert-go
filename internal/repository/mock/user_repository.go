@@ -97,6 +97,11 @@ func (m *userRepositoryMock) FindAll(ctx context.Context, filter repository.User
 		if u.DeletedAt.Valid {
 			continue
 		}
+		if filter.OrganizerID != nil {
+			if !isMockOrganizerStaff(*filter.OrganizerID, u.ID) {
+				continue
+			}
+		}
 		if searchLower != "" {
 			nameMatch := strings.Contains(strings.ToLower(u.Name), searchLower)
 			emailMatch := strings.Contains(strings.ToLower(u.Email), searchLower)
@@ -112,11 +117,31 @@ func (m *userRepositoryMock) FindAll(ctx context.Context, filter repository.User
 		if filter.Status != "" && u.Status != filter.Status {
 			continue
 		}
+		if filter.StartDate != nil && u.CreatedAt.Before(*filter.StartDate) {
+			continue
+		}
+		if filter.EndDate != nil && u.CreatedAt.After(*filter.EndDate) {
+			continue
+		}
 		filtered = append(filtered, u)
 	}
 
+	asc := strings.EqualFold(strings.TrimSpace(filter.SortOrder), "ASC")
+	sortBy := strings.ToLower(strings.TrimSpace(filter.SortBy))
 	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+		var less bool
+		switch sortBy {
+		case "name":
+			less = strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+		case "email":
+			less = strings.ToLower(filtered[i].Email) < strings.ToLower(filtered[j].Email)
+		default:
+			less = filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+		}
+		if asc {
+			return less
+		}
+		return !less
 	})
 
 	total := len(filtered)

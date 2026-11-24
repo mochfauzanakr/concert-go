@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"concert-go/internal/domain/entity"
+	"concert-go/internal/domain/model"
 	"concert-go/internal/repository"
 
 	"github.com/google/uuid"
@@ -145,6 +146,24 @@ func (r *userRepositoryImpl) FindAll(ctx context.Context, filter repository.User
 		argIdx++
 	}
 
+	if filter.OrganizerID != nil {
+		where = append(where, fmt.Sprintf("id IN (SELECT user_id FROM organizer_staffs WHERE organizer_id = $%d)", argIdx))
+		args = append(args, *filter.OrganizerID)
+		argIdx++
+	}
+
+	if filter.StartDate != nil {
+		where = append(where, fmt.Sprintf("created_at >= $%d", argIdx))
+		args = append(args, *filter.StartDate)
+		argIdx++
+	}
+
+	if filter.EndDate != nil {
+		where = append(where, fmt.Sprintf("created_at <= $%d", argIdx))
+		args = append(args, *filter.EndDate)
+		argIdx++
+	}
+
 	whereClause := strings.Join(where, " AND ")
 
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users WHERE %s", whereClause)
@@ -155,13 +174,22 @@ func (r *userRepositoryImpl) FindAll(ctx context.Context, filter repository.User
 		return nil, 0, err
 	}
 
+	sortCol := model.ResolveSortColumn(filter.SortBy, map[string]string{
+		"createdat":  "created_at",
+		"created_at": "created_at",
+		"name":       "name",
+		"email":      "email",
+		"status":     "status",
+	}, "created_at")
+	sortOrder := model.ResolveSortOrder(filter.SortOrder)
+
 	dataQuery := fmt.Sprintf(`
 		SELECT id, role_id, name, email, password_hash, provider, provider_id, avatar_url, status, created_at, updated_at, deleted_at
 		FROM users
 		WHERE %s
-		ORDER BY created_at DESC
+		ORDER BY %s %s
 		LIMIT $%d OFFSET $%d
-	`, whereClause, argIdx, argIdx+1)
+	`, whereClause, sortCol, sortOrder, argIdx, argIdx+1)
 
 	limit := filter.Limit
 	if limit <= 0 {

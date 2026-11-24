@@ -23,6 +23,7 @@ type UserUsecase struct {
 	roleRepo       repository.RoleRepository
 	inviteRepo     repository.InviteRepository
 	sessionRepo    repository.SessionRepository
+	organizerRepo  repository.OrganizerRepository
 	emailSender    util.EmailSender
 	storageService util.StorageService
 	cfg            *config.Config
@@ -33,6 +34,7 @@ func NewUserUsecase(
 	roleRepo repository.RoleRepository,
 	inviteRepo repository.InviteRepository,
 	sessionRepo repository.SessionRepository,
+	organizerRepo repository.OrganizerRepository,
 	emailSender util.EmailSender,
 	storageService util.StorageService,
 	cfg *config.Config,
@@ -42,6 +44,7 @@ func NewUserUsecase(
 		roleRepo:       roleRepo,
 		inviteRepo:     inviteRepo,
 		sessionRepo:    sessionRepo,
+		organizerRepo:  organizerRepo,
 		emailSender:    emailSender,
 		storageService: storageService,
 		cfg:            cfg,
@@ -185,6 +188,32 @@ func (u *UserUsecase) AcceptInvite(ctx context.Context, req request.AcceptInvite
 		return nil, err
 	}
 
+	if u.organizerRepo != nil && u.roleRepo != nil {
+		if role, err := u.roleRepo.FindByID(ctx, invite.RoleID); err == nil && role != nil {
+			switch strings.ToUpper(role.Name) {
+			case "STAFF":
+				if err := u.organizerRepo.AddStaff(ctx, invite.InvitedBy, user.ID); err != nil {
+					return nil, err
+				}
+			case "ORGANIZER":
+				if app, err := u.organizerRepo.FindLatestApplicationByEmail(ctx, invite.Email); err == nil && app != nil && app.Status == entity.ApplicationStatusApproved {
+					desc := app.Description
+					phone := app.Phone
+					profile := &entity.OrganizerProfile{
+						UserID:      user.ID,
+						OrgName:     app.OrgName,
+						Description: &desc,
+						Phone:       &phone,
+						SocialMedia: app.SocialMedia,
+					}
+					if err := u.organizerRepo.Upsert(ctx, profile); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
+
 	now := time.Now()
 	_ = u.inviteRepo.UpdateStatus(ctx, invite.ID, entity.InviteStatusAccepted, &now)
 
@@ -251,28 +280,18 @@ func (u *UserUsecase) GetUserDetail(ctx context.Context, id uuid.UUID) (*respons
 }
 
 func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRequest) (*response.PageResponse[response.UserListItemResponse], error) {
-	page := req.Page
-	if page <= 0 {
-		page = 1
-	}
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 10
-	}
-	if pageSize > 20 {
-		pageSize = 20
-	}
-
-	search := strings.TrimSpace(req.Search)
-	status := strings.ToUpper(strings.TrimSpace(req.Status))
-	offset := model.CalculateOffset(page, pageSize)
+	req.Normalize(20)
 
 	filter := repository.UserFilter{
-		Search: search,
-		RoleID: req.RoleID,
-		Status: status,
-		Limit:  pageSize,
-		Offset: offset,
+		Search:    req.Search,
+		RoleID:    req.RoleID,
+		Status:    strings.ToUpper(strings.TrimSpace(req.Status)),
+		StartDate: req.StartDate,
+		EndDate:   req.EndDate,
+		SortBy:    req.SortBy,
+		SortOrder: req.SortOrder,
+		Limit:     req.PageSize,
+		Offset:    model.CalculateOffset(req.Page, req.PageSize),
 	}
 
 	users, total, err := u.userRepo.FindAll(ctx, filter)
@@ -293,7 +312,7 @@ func (u *UserUsecase) GetAllUsers(ctx context.Context, req request.GetUserListRe
 		})
 	}
 
-	pagination := model.BuildPagination(total, page, pageSize)
+	pagination := model.BuildPagination(total, req.Page, req.PageSize)
 
 	return &response.PageResponse[response.UserListItemResponse]{
 		Items:      items,
@@ -349,13 +368,15 @@ func (u *UserUsecase) UpdateUserStatus(
 		return nil, exception.Forbidden("admins cannot change status of other admins or super admins")
 	}
 
+	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
+		if err := u.sessionRepo.RevokeByUserID(ctx, targetUserID); err != nil {
+			return nil, exception.Internal("failed to revoke user sessions", err)
+		}
+	}
+
 	targetUser.Status = status
 	if err := u.userRepo.Update(ctx, targetUser); err != nil {
 		return nil, err
-	}
-
-	if status == entity.UserStatusSuspended && u.sessionRepo != nil {
-		_ = u.sessionRepo.RevokeByUserID(ctx, targetUserID)
 	}
 
 	return &response.UserDetailResponse{

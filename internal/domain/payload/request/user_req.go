@@ -1,5 +1,7 @@
 package request
 
+import "concert-go/internal/domain/model"
+
 type InviteUserRequest struct {
 	Email string `json:"email" binding:"required,email,max=100"`
 	Role  string `json:"role" binding:"required"`
@@ -13,11 +15,9 @@ type AcceptInviteRequest struct {
 }
 
 type GetUserListRequest struct {
-	Page     int    `json:"page"`
-	PageSize int    `json:"pageSize"`
-	Search   string `json:"search"`
-	RoleID   *int   `json:"roleId"`
-	Status   string `json:"status"`
+	model.BaseListParams
+	RoleID *int   `json:"roleId"`
+	Status string `json:"status"`
 }
 
 type UpdateUserStatusRequest struct {

@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// InviteRepository contract for invite data persistence
 type InviteRepository interface {
 	Create(ctx context.Context, invite *entity.Invite) error
 	FindByTokenHash(ctx context.Context, tokenHash string) (*entity.Invite, error)

@@ -131,9 +131,9 @@ func (u *AuthUsecase) VerifyOTP(ctx context.Context, req request.VerifyOTPReques
 
 	var roleID *int
 	if u.roleRepo != nil {
-		buyerRole, err := u.roleRepo.FindByName(ctx, "USER")
-		if err == nil && buyerRole != nil {
-			roleID = &buyerRole.ID
+		userRole, err := u.roleRepo.FindByName(ctx, "USER")
+		if err == nil && userRole != nil {
+			roleID = &userRole.ID
 		}
 	}
 
@@ -184,9 +184,9 @@ func (u *AuthUsecase) OAuthLogin(ctx context.Context, email, name, provider, pro
 		} else {
 			var roleID *int
 			if u.roleRepo != nil {
-				buyerRole, err := u.roleRepo.FindByName(ctx, "USER")
-				if err == nil && buyerRole != nil {
-					roleID = &buyerRole.ID
+				userRole, err := u.roleRepo.FindByName(ctx, "USER")
+				if err == nil && userRole != nil {
+					roleID = &userRole.ID
 				}
 			}
 

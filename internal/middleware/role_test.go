@@ -61,12 +61,12 @@ func TestRequireRoleMiddleware(t *testing.T) {
 
 	t.Run("insufficient role returns 403", func(t *testing.T) {
 		r := gin.New()
-		buyer, _ := roleRepo.FindByName(context.Background(), "USER")
+		user, _ := roleRepo.FindByName(context.Background(), "USER")
 		r.Use(func(c *gin.Context) {
 			c.Set(middleware.UserSessionContextKey, model.UserSession{
 				UserID: uuid.New(),
-				Email:  "buyer@example.com",
-				RoleID: &buyer.ID,
+				Email:  "user@example.com",
+				RoleID: &user.ID,
 			})
 		})
 		r.GET("/admin-only", middleware.RequireRole(roleRepo, "ADMIN"), func(c *gin.Context) {

@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// SessionRepository contract for stateful session persistence
 type SessionRepository interface {
 	Create(ctx context.Context, session *entity.Session) error
 	FindByTokenHash(ctx context.Context, tokenHash string) (*entity.Session, error)
