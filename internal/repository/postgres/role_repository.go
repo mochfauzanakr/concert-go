@@ -20,7 +20,7 @@ func NewRoleRepository(db *sql.DB) repository.RoleRepository {
 
 func (r *roleRepositoryImpl) FindAll(ctx context.Context) ([]entity.Role, error) {
 	query := `SELECT id, name, created_at, updated_at FROM roles ORDER BY id ASC`
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := execer(ctx, r.db).QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -42,13 +42,13 @@ func (r *roleRepositoryImpl) FindAll(ctx context.Context) ([]entity.Role, error)
 
 func (r *roleRepositoryImpl) FindByID(ctx context.Context, id int) (*entity.Role, error) {
 	query := `SELECT id, name, created_at, updated_at FROM roles WHERE id = $1 LIMIT 1`
-	row := r.db.QueryRowContext(ctx, query, id)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, id)
 	return scanRole(row)
 }
 
 func (r *roleRepositoryImpl) FindByName(ctx context.Context, name string) (*entity.Role, error) {
 	query := `SELECT id, name, created_at, updated_at FROM roles WHERE UPPER(name) = UPPER($1) LIMIT 1`
-	row := r.db.QueryRowContext(ctx, query, name)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, name)
 	return scanRole(row)
 }
 

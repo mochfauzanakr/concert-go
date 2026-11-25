@@ -60,6 +60,13 @@ func Conflict(message string) *AppException {
 	}
 }
 
+func UnprocessableEntity(message string) *AppException {
+	return &AppException{
+		Code:    http.StatusUnprocessableEntity,
+		Message: message,
+	}
+}
+
 func Internal(message string, err error) *AppException {
 	return &AppException{
 		Code:    http.StatusInternalServerError,

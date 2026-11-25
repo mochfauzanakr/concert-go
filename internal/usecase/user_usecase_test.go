@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"mime/multipart"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"concert-go/internal/domain/entity"
 	"concert-go/internal/domain/model"
 	"concert-go/internal/domain/payload/request"
+	"concert-go/internal/repository"
 	"concert-go/internal/repository/mock"
 	"concert-go/internal/usecase"
 	"concert-go/internal/util"
@@ -38,7 +40,7 @@ func setupUserUsecase() (*usecase.UserUsecase, *mockEmailSender) {
 	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, emailSender, storageService, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, mock.NewTransactorMock(), emailSender, storageService, cfg)
 	return uc, emailSender
 }
 
@@ -155,7 +157,7 @@ func TestUserUsecase_AcceptInvite(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), emailSender, nil, cfg)
 
 	rawToken := "valid-secret-token-12345"
 	tokenHash := util.HashToken(rawToken)
@@ -336,7 +338,7 @@ func TestUserUsecase_ValidateInvite(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), emailSender, nil, cfg)
 
 	rawToken := "valid-token-for-check"
 	tokenHash := util.HashToken(rawToken)
@@ -389,7 +391,7 @@ func TestUserUsecase_GetUserDetail(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), emailSender, nil, cfg)
 
 	organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
 	userID := uuid.New()
@@ -438,7 +440,7 @@ func TestUserUsecase_GetAllUsers(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), emailSender, nil, cfg)
 
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
 	userRole, _ := roleRepo.FindByName(ctx, "USER")
@@ -540,7 +542,7 @@ func TestUserUsecase_UpdateUserStatus(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), emailSender, nil, cfg)
 
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
@@ -666,7 +668,7 @@ func TestUserUsecase_UpdateProfile(t *testing.T) {
 	storageService := &mockStorageService{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), mock.NewOrganizerRepositoryMock(), emailSender, storageService, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), mock.NewOrganizerRepositoryMock(), mock.NewTransactorMock(), emailSender, storageService, cfg)
 
 	userRole, _ := roleRepo.FindByName(ctx, "USER")
 	userID := uuid.New()
@@ -727,7 +729,7 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 	emailSender := &mockEmailSender{}
 	cfg := &config.Config{}
 
-	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, emailSender, nil, cfg)
+	uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), emailSender, nil, cfg)
 
 	superAdminRole, _ := roleRepo.FindByName(ctx, "SUPER_ADMIN")
 	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
@@ -838,6 +840,249 @@ func TestUserUsecase_AdminUpdateUser(t *testing.T) {
 		}
 		if res.RoleID == nil || *res.RoleID != organizerRole.ID {
 			t.Errorf("expected roleId %d, got %v", organizerRole.ID, res.RoleID)
+		}
+	})
+}
+
+type failingOrganizerRepo struct {
+	repository.OrganizerRepository
+	addStaffErr error
+	upsertErr   error
+}
+
+func (f *failingOrganizerRepo) AddStaff(ctx context.Context, organizerID, userID uuid.UUID) error {
+	if f.addStaffErr != nil {
+		return f.addStaffErr
+	}
+	return f.OrganizerRepository.AddStaff(ctx, organizerID, userID)
+}
+
+func (f *failingOrganizerRepo) Upsert(ctx context.Context, profile *entity.OrganizerProfile) error {
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
+	return f.OrganizerRepository.Upsert(ctx, profile)
+}
+
+type failingInviteRepo struct {
+	repository.InviteRepository
+	updateStatusErr error
+}
+
+func (f *failingInviteRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string, acceptedAt *time.Time) error {
+	if f.updateStatusErr != nil {
+		return f.updateStatusErr
+	}
+	return f.InviteRepository.UpdateStatus(ctx, id, status, acceptedAt)
+}
+
+func TestUserUsecase_AcceptInvite_TransactionRollbackAndRetry(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("STAFF AddStaff failure rolls back user and allows retry", func(t *testing.T) {
+		userRepo := mock.NewUserRepositoryMock()
+		roleRepo := mock.NewRoleRepositoryMock()
+		inviteRepo := mock.NewInviteRepositoryMock()
+		organizerRepo := &failingOrganizerRepo{
+			OrganizerRepository: mock.NewOrganizerRepositoryMock(),
+			addStaffErr:         errors.New("simulated add staff failure"),
+		}
+		uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), &mockEmailSender{}, nil, &config.Config{})
+
+		staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
+		organizerID := uuid.New()
+		rawToken := "staff-rollback-token"
+		tokenHash := util.HashToken(rawToken)
+		email := "staff-retry@example.com"
+
+		_ = inviteRepo.Create(ctx, &entity.Invite{
+			ID:        uuid.New(),
+			Email:     email,
+			RoleID:    staffRole.ID,
+			InvitedBy: organizerID,
+			TokenHash: tokenHash,
+			Status:    entity.InviteStatusPending,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+
+		_, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           rawToken,
+			Name:            "Staff Retry",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error when AddStaff fails")
+		}
+
+		u, err := userRepo.FindByEmail(ctx, email)
+		if err != nil {
+			t.Fatalf("unexpected FindByEmail error: %v", err)
+		}
+		if u != nil {
+			t.Fatalf("expected user creation to be rolled back, but found user %s", u.ID)
+		}
+
+		inv, err := inviteRepo.FindByTokenHash(ctx, tokenHash)
+		if err != nil || inv == nil {
+			t.Fatalf("expected invite to remain, got inv=%v err=%v", inv, err)
+		}
+		if inv.Status != entity.InviteStatusPending {
+			t.Errorf("expected invite status PENDING after rollback, got %s", inv.Status)
+		}
+
+		// Clear failure and retry with the same token
+		organizerRepo.addStaffErr = nil
+		res, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           rawToken,
+			Name:            "Staff Retry",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err != nil {
+			t.Fatalf("expected retry to succeed after rollback, got %v", err)
+		}
+
+		isStaff, err := organizerRepo.IsStaffOfOrganizer(ctx, organizerID, res.ID)
+		if err != nil || !isStaff {
+			t.Fatalf("expected staff to be linked on retry, got isStaff=%v err=%v", isStaff, err)
+		}
+		invAfter, _ := inviteRepo.FindByTokenHash(ctx, tokenHash)
+		if invAfter.Status != entity.InviteStatusAccepted {
+			t.Errorf("expected invite status ACCEPTED after retry, got %s", invAfter.Status)
+		}
+	})
+
+	t.Run("ORGANIZER Upsert failure rolls back user and allows retry", func(t *testing.T) {
+		userRepo := mock.NewUserRepositoryMock()
+		roleRepo := mock.NewRoleRepositoryMock()
+		inviteRepo := mock.NewInviteRepositoryMock()
+		organizerRepo := &failingOrganizerRepo{
+			OrganizerRepository: mock.NewOrganizerRepositoryMock(),
+			upsertErr:           errors.New("simulated profile upsert failure"),
+		}
+		uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), &mockEmailSender{}, nil, &config.Config{})
+
+		organizerRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+		email := "org-retry@example.com"
+		_ = organizerRepo.CreateApplication(ctx, &entity.OrganizerApplication{
+			ID:          uuid.New(),
+			PicName:     "Org PIC",
+			Email:       email,
+			Phone:       "081234567890",
+			OrgName:     "Retry Live",
+			Description: "Promotor konser",
+			Status:      entity.ApplicationStatusApproved,
+		})
+
+		rawToken := "org-rollback-token"
+		tokenHash := util.HashToken(rawToken)
+		_ = inviteRepo.Create(ctx, &entity.Invite{
+			ID:        uuid.New(),
+			Email:     email,
+			RoleID:    organizerRole.ID,
+			InvitedBy: uuid.New(),
+			TokenHash: tokenHash,
+			Status:    entity.InviteStatusPending,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+
+		_, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           rawToken,
+			Name:            "Org PIC",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error when Upsert fails")
+		}
+
+		if u, _ := userRepo.FindByEmail(ctx, email); u != nil {
+			t.Fatalf("expected user creation to be rolled back, found user %s", u.ID)
+		}
+		if inv, _ := inviteRepo.FindByTokenHash(ctx, tokenHash); inv.Status != entity.InviteStatusPending {
+			t.Errorf("expected invite status PENDING after rollback, got %s", inv.Status)
+		}
+
+		// Clear failure and retry
+		organizerRepo.upsertErr = nil
+		res, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           rawToken,
+			Name:            "Org PIC",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err != nil {
+			t.Fatalf("expected retry to succeed after rollback, got %v", err)
+		}
+
+		profile, err := organizerRepo.FindByUserID(ctx, res.ID)
+		if err != nil || profile == nil || profile.OrgName != "Retry Live" {
+			t.Fatalf("expected organizer profile to be created on retry, got profile=%v err=%v", profile, err)
+		}
+		if invAfter, _ := inviteRepo.FindByTokenHash(ctx, tokenHash); invAfter.Status != entity.InviteStatusAccepted {
+			t.Errorf("expected invite status ACCEPTED after retry, got %s", invAfter.Status)
+		}
+	})
+
+	t.Run("UpdateStatus failure rolls back user and staff link", func(t *testing.T) {
+		userRepo := mock.NewUserRepositoryMock()
+		roleRepo := mock.NewRoleRepositoryMock()
+		inviteRepo := &failingInviteRepo{
+			InviteRepository: mock.NewInviteRepositoryMock(),
+			updateStatusErr:  errors.New("simulated update status failure"),
+		}
+		organizerRepo := mock.NewOrganizerRepositoryMock()
+		uc := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, mock.NewSessionRepositoryMock(), organizerRepo, mock.NewTransactorMock(), &mockEmailSender{}, nil, &config.Config{})
+
+		staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
+		organizerID := uuid.New()
+		rawToken := "status-fail-token"
+		tokenHash := util.HashToken(rawToken)
+		email := "status-fail@example.com"
+
+		_ = inviteRepo.Create(ctx, &entity.Invite{
+			ID:        uuid.New(),
+			Email:     email,
+			RoleID:    staffRole.ID,
+			InvitedBy: organizerID,
+			TokenHash: tokenHash,
+			Status:    entity.InviteStatusPending,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+
+		_, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           rawToken,
+			Name:            "Status Fail Staff",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err == nil {
+			t.Fatal("expected error when UpdateStatus fails")
+		}
+
+		if u, _ := userRepo.FindByEmail(ctx, email); u != nil {
+			t.Fatalf("expected user creation to be rolled back, found user %s", u.ID)
+		}
+		if inv, _ := inviteRepo.FindByTokenHash(ctx, tokenHash); inv.Status != entity.InviteStatusPending {
+			t.Errorf("expected invite status PENDING after rollback, got %s", inv.Status)
+		}
+
+		// Clear failure and retry
+		inviteRepo.updateStatusErr = nil
+		res, err := uc.AcceptInvite(ctx, request.AcceptInviteRequest{
+			Token:           rawToken,
+			Name:            "Status Fail Staff",
+			Password:        "Password123!",
+			ConfirmPassword: "Password123!",
+		})
+		if err != nil {
+			t.Fatalf("expected retry to succeed after rollback, got %v", err)
+		}
+
+		isStaff, err := organizerRepo.IsStaffOfOrganizer(ctx, organizerID, res.ID)
+		if err != nil || !isStaff {
+			t.Fatalf("expected staff to be linked on retry, got isStaff=%v err=%v", isStaff, err)
 		}
 	})
 }

@@ -89,8 +89,19 @@ func (m *organizerRepositoryMock) Upsert(ctx context.Context, profile *entity.Or
 		profile.UpdatedAt = now
 	}
 
+	prev, existed := m.profiles[profile.UserID]
 	copyProfile := *profile
 	m.profiles[profile.UserID] = &copyProfile
+	userID := profile.UserID
+	registerRollback(ctx, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if existed {
+			m.profiles[userID] = prev
+		} else {
+			delete(m.profiles, userID)
+		}
+	})
 	return nil
 }
 
@@ -101,7 +112,17 @@ func (m *organizerRepositoryMock) AddStaff(ctx context.Context, organizerID, use
 	if staffRegistry[organizerID] == nil {
 		staffRegistry[organizerID] = make(map[uuid.UUID]struct{})
 	}
+	_, existed := staffRegistry[organizerID][userID]
 	staffRegistry[organizerID][userID] = struct{}{}
+	if !existed {
+		registerRollback(ctx, func() {
+			staffRegistryMu.Lock()
+			defer staffRegistryMu.Unlock()
+			if set, ok := staffRegistry[organizerID]; ok {
+				delete(set, userID)
+			}
+		})
+	}
 	return nil
 }
 
@@ -123,8 +144,19 @@ func (m *organizerRepositoryMock) CreateApplication(ctx context.Context, app *en
 		app.Status = entity.ApplicationStatusPending
 	}
 
+	prev, existed := m.applications[app.ID]
 	copyApp := *app
 	m.applications[app.ID] = &copyApp
+	appID := app.ID
+	registerRollback(ctx, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if existed {
+			m.applications[appID] = prev
+		} else {
+			delete(m.applications, appID)
+		}
+	})
 	return nil
 }
 
@@ -230,9 +262,18 @@ func (m *organizerRepositoryMock) UpdateApplicationReview(ctx context.Context, a
 	if !exists {
 		return nil
 	}
+	prev := *existing
 	existing.Status = app.Status
 	existing.RejectionReason = app.RejectionReason
 	existing.ReviewedBy = app.ReviewedBy
 	existing.ReviewedAt = app.ReviewedAt
+	appID := app.ID
+	registerRollback(ctx, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if cur, ok := m.applications[appID]; ok {
+			*cur = prev
+		}
+	})
 	return nil
 }

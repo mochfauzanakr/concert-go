@@ -27,6 +27,10 @@ func main() {
 			&entity.OrganizerProfile{},
 			&entity.OrganizerStaff{},
 			&entity.OrganizerApplication{},
+			&entity.Event{},
+			&entity.EventOrganizer{},
+			&entity.Artist{},
+			&entity.EventArtist{},
 		)
 		if err != nil {
 			log.Fatalf("Migration failed: %v", err)

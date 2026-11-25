@@ -24,6 +24,7 @@ type UserUsecase struct {
 	inviteRepo     repository.InviteRepository
 	sessionRepo    repository.SessionRepository
 	organizerRepo  repository.OrganizerRepository
+	tx             repository.Transactor
 	emailSender    util.EmailSender
 	storageService util.StorageService
 	cfg            *config.Config
@@ -35,6 +36,7 @@ func NewUserUsecase(
 	inviteRepo repository.InviteRepository,
 	sessionRepo repository.SessionRepository,
 	organizerRepo repository.OrganizerRepository,
+	tx repository.Transactor,
 	emailSender util.EmailSender,
 	storageService util.StorageService,
 	cfg *config.Config,
@@ -45,6 +47,7 @@ func NewUserUsecase(
 		inviteRepo:     inviteRepo,
 		sessionRepo:    sessionRepo,
 		organizerRepo:  organizerRepo,
+		tx:             tx,
 		emailSender:    emailSender,
 		storageService: storageService,
 		cfg:            cfg,
@@ -184,38 +187,60 @@ func (u *UserUsecase) AcceptInvite(ctx context.Context, req request.AcceptInvite
 		Status:       entity.UserStatusActive,
 	}
 
-	if err := u.userRepo.Create(ctx, user); err != nil {
-		return nil, err
-	}
+	txWork := func(txCtx context.Context) error {
+		if err := u.userRepo.Create(txCtx, user); err != nil {
+			return err
+		}
 
-	if u.organizerRepo != nil && u.roleRepo != nil {
-		if role, err := u.roleRepo.FindByID(ctx, invite.RoleID); err == nil && role != nil {
-			switch strings.ToUpper(role.Name) {
-			case "STAFF":
-				if err := u.organizerRepo.AddStaff(ctx, invite.InvitedBy, user.ID); err != nil {
-					return nil, err
-				}
-			case "ORGANIZER":
-				if app, err := u.organizerRepo.FindLatestApplicationByEmail(ctx, invite.Email); err == nil && app != nil && app.Status == entity.ApplicationStatusApproved {
-					desc := app.Description
-					phone := app.Phone
-					profile := &entity.OrganizerProfile{
-						UserID:      user.ID,
-						OrgName:     app.OrgName,
-						Description: &desc,
-						Phone:       &phone,
-						SocialMedia: app.SocialMedia,
+		if u.organizerRepo != nil && u.roleRepo != nil {
+			role, err := u.roleRepo.FindByID(txCtx, invite.RoleID)
+			if err != nil {
+				return err
+			}
+			if role != nil {
+				switch strings.ToUpper(role.Name) {
+				case "STAFF":
+					if err := u.organizerRepo.AddStaff(txCtx, invite.InvitedBy, user.ID); err != nil {
+						return err
 					}
-					if err := u.organizerRepo.Upsert(ctx, profile); err != nil {
-						return nil, err
+				case "ORGANIZER":
+					app, err := u.organizerRepo.FindLatestApplicationByEmail(txCtx, invite.Email)
+					if err != nil {
+						return err
+					}
+					if app != nil && app.Status == entity.ApplicationStatusApproved {
+						desc := app.Description
+						phone := app.Phone
+						profile := &entity.OrganizerProfile{
+							UserID:      user.ID,
+							OrgName:     app.OrgName,
+							Description: &desc,
+							Phone:       &phone,
+							SocialMedia: app.SocialMedia,
+						}
+						if err := u.organizerRepo.Upsert(txCtx, profile); err != nil {
+							return err
+						}
 					}
 				}
 			}
 		}
+
+		now := time.Now()
+		if err := u.inviteRepo.UpdateStatus(txCtx, invite.ID, entity.InviteStatusAccepted, &now); err != nil {
+			return err
+		}
+		return nil
 	}
 
-	now := time.Now()
-	_ = u.inviteRepo.UpdateStatus(ctx, invite.ID, entity.InviteStatusAccepted, &now)
+	if u.tx != nil {
+		err = u.tx.WithinTx(ctx, txWork)
+	} else {
+		err = txWork(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	return &response.UserResponse{
 		ID:        user.ID,

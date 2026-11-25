@@ -30,7 +30,7 @@ func (r *organizerRepositoryImpl) FindByUserID(ctx context.Context, userID uuid.
 		WHERE user_id = $1
 		LIMIT 1
 	`
-	return r.scanRow(r.db.QueryRowContext(ctx, query, userID))
+	return r.scanRow(execer(ctx, r.db).QueryRowContext(ctx, query, userID))
 }
 
 func (r *organizerRepositoryImpl) FindByIDOrUserID(ctx context.Context, id uuid.UUID) (*entity.OrganizerProfile, error) {
@@ -40,7 +40,7 @@ func (r *organizerRepositoryImpl) FindByIDOrUserID(ctx context.Context, id uuid.
 		WHERE id = $1 OR user_id = $1
 		LIMIT 1
 	`
-	return r.scanRow(r.db.QueryRowContext(ctx, query, id))
+	return r.scanRow(execer(ctx, r.db).QueryRowContext(ctx, query, id))
 }
 
 func (r *organizerRepositoryImpl) scanRow(row *sql.Row) (*entity.OrganizerProfile, error) {
@@ -101,7 +101,7 @@ func (r *organizerRepositoryImpl) Upsert(ctx context.Context, profile *entity.Or
 	`
 
 	var logoURL sql.NullString
-	err := r.db.QueryRowContext(ctx, query,
+	err := execer(ctx, r.db).QueryRowContext(ctx, query,
 		profile.ID,
 		profile.UserID,
 		profile.OrgName,
@@ -129,14 +129,14 @@ func (r *organizerRepositoryImpl) AddStaff(ctx context.Context, organizerID, use
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (organizer_id, user_id) DO NOTHING
 	`
-	_, err := r.db.ExecContext(ctx, query, uuid.New(), organizerID, userID, time.Now())
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, uuid.New(), organizerID, userID, time.Now())
 	return err
 }
 
 func (r *organizerRepositoryImpl) IsStaffOfOrganizer(ctx context.Context, organizerID, userID uuid.UUID) (bool, error) {
 	query := `SELECT EXISTS(SELECT 1 FROM organizer_staffs WHERE organizer_id = $1 AND user_id = $2)`
 	var exists bool
-	err := r.db.QueryRowContext(ctx, query, organizerID, userID).Scan(&exists)
+	err := execer(ctx, r.db).QueryRowContext(ctx, query, organizerID, userID).Scan(&exists)
 	return exists, err
 }
 
@@ -204,7 +204,7 @@ func (r *organizerRepositoryImpl) CreateApplication(ctx context.Context, app *en
 		INSERT INTO organizer_applications (id, pic_name, email, phone, org_name, social_media, description, status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
 		app.ID,
 		app.PicName,
 		app.Email,
@@ -225,7 +225,7 @@ func (r *organizerRepositoryImpl) FindApplicationByID(ctx context.Context, id uu
 		WHERE id = $1
 		LIMIT 1
 	`
-	return scanApplication(r.db.QueryRowContext(ctx, query, id))
+	return scanApplication(execer(ctx, r.db).QueryRowContext(ctx, query, id))
 }
 
 func (r *organizerRepositoryImpl) FindLatestApplicationByEmail(ctx context.Context, email string) (*entity.OrganizerApplication, error) {
@@ -236,7 +236,7 @@ func (r *organizerRepositoryImpl) FindLatestApplicationByEmail(ctx context.Conte
 		ORDER BY created_at DESC
 		LIMIT 1
 	`
-	return scanApplication(r.db.QueryRowContext(ctx, query, email))
+	return scanApplication(execer(ctx, r.db).QueryRowContext(ctx, query, email))
 }
 
 func (r *organizerRepositoryImpl) FindAllApplications(ctx context.Context, filter repository.OrganizerApplicationFilter) ([]*entity.OrganizerApplication, int, error) {
@@ -272,7 +272,7 @@ func (r *organizerRepositoryImpl) FindAllApplications(ctx context.Context, filte
 
 	var total int
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM organizer_applications WHERE %s", whereClause)
-	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := execer(ctx, r.db).QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -301,7 +301,7 @@ func (r *organizerRepositoryImpl) FindAllApplications(ctx context.Context, filte
 		LIMIT $%d OFFSET $%d
 	`, whereClause, sortCol, sortOrder, argIdx, argIdx+1)
 
-	rows, err := r.db.QueryContext(ctx, dataQuery, append(args, limit, filter.Offset)...)
+	rows, err := execer(ctx, r.db).QueryContext(ctx, dataQuery, append(args, limit, filter.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -326,6 +326,6 @@ func (r *organizerRepositoryImpl) UpdateApplicationReview(ctx context.Context, a
 		SET status = $1, rejection_reason = $2, reviewed_by = $3, reviewed_at = $4
 		WHERE id = $5
 	`
-	_, err := r.db.ExecContext(ctx, query, app.Status, app.RejectionReason, app.ReviewedBy, app.ReviewedAt, app.ID)
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, app.Status, app.RejectionReason, app.ReviewedBy, app.ReviewedAt, app.ID)
 	return err
 }

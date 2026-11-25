@@ -39,7 +39,19 @@ func (m *userRepositoryMock) Create(ctx context.Context, user *entity.User) erro
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
-	m.users[user.ID] = user
+	prev, existed := m.users[user.ID]
+	copyUser := *user
+	m.users[user.ID] = &copyUser
+	userID := user.ID
+	registerRollback(ctx, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if existed {
+			m.users[userID] = prev
+		} else {
+			delete(m.users, userID)
+		}
+	})
 	return nil
 }
 
@@ -48,7 +60,19 @@ func (m *userRepositoryMock) Update(ctx context.Context, user *entity.User) erro
 	defer m.mu.Unlock()
 
 	user.UpdatedAt = time.Now()
-	m.users[user.ID] = user
+	prev, existed := m.users[user.ID]
+	copyUser := *user
+	m.users[user.ID] = &copyUser
+	userID := user.ID
+	registerRollback(ctx, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if existed {
+			m.users[userID] = prev
+		} else {
+			delete(m.users, userID)
+		}
+	})
 	return nil
 }
 
@@ -58,7 +82,8 @@ func (m *userRepositoryMock) FindByEmail(ctx context.Context, email string) (*en
 
 	for _, u := range m.users {
 		if u.Email == email && !u.DeletedAt.Valid {
-			return u, nil
+			copyUser := *u
+			return &copyUser, nil
 		}
 	}
 	return nil, nil
@@ -70,7 +95,8 @@ func (m *userRepositoryMock) FindByProvider(ctx context.Context, provider, provi
 
 	for _, u := range m.users {
 		if u.Provider == provider && u.ProviderID != nil && *u.ProviderID == providerID && !u.DeletedAt.Valid {
-			return u, nil
+			copyUser := *u
+			return &copyUser, nil
 		}
 	}
 	return nil, nil
@@ -81,7 +107,8 @@ func (m *userRepositoryMock) FindByID(ctx context.Context, id uuid.UUID) (*entit
 	defer m.mu.RUnlock()
 
 	if u, exists := m.users[id]; exists && !u.DeletedAt.Valid {
-		return u, nil
+		copyUser := *u
+		return &copyUser, nil
 	}
 	return nil, nil
 }
@@ -123,7 +150,8 @@ func (m *userRepositoryMock) FindAll(ctx context.Context, filter repository.User
 		if filter.EndDate != nil && u.CreatedAt.After(*filter.EndDate) {
 			continue
 		}
-		filtered = append(filtered, u)
+		copyUser := *u
+		filtered = append(filtered, &copyUser)
 	}
 
 	asc := strings.EqualFold(strings.TrimSpace(filter.SortOrder), "ASC")

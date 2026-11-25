@@ -37,7 +37,19 @@ func (m *inviteRepositoryMock) Create(ctx context.Context, invite *entity.Invite
 		invite.Status = entity.InviteStatusPending
 	}
 
-	m.invites[invite.ID] = invite
+	prev, existed := m.invites[invite.ID]
+	copyInv := *invite
+	m.invites[invite.ID] = &copyInv
+	inviteID := invite.ID
+	registerRollback(ctx, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if existed {
+			m.invites[inviteID] = prev
+		} else {
+			delete(m.invites, inviteID)
+		}
+	})
 	return nil
 }
 
@@ -73,8 +85,18 @@ func (m *inviteRepositoryMock) UpdateStatus(ctx context.Context, id uuid.UUID, s
 	defer m.mu.Unlock()
 
 	if inv, exists := m.invites[id]; exists {
+		prevStatus := inv.Status
+		prevAcceptedAt := inv.AcceptedAt
 		inv.Status = status
 		inv.AcceptedAt = acceptedAt
+		registerRollback(ctx, func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			if cur, ok := m.invites[id]; ok {
+				cur.Status = prevStatus
+				cur.AcceptedAt = prevAcceptedAt
+			}
+		})
 	}
 	return nil
 }

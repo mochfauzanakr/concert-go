@@ -36,7 +36,7 @@ func (r *inviteRepositoryImpl) Create(ctx context.Context, invite *entity.Invite
 	}
 	invite.CreatedAt = now
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
 		invite.ID,
 		invite.Email,
 		invite.RoleID,
@@ -59,7 +59,7 @@ func (r *inviteRepositoryImpl) FindByTokenHash(ctx context.Context, tokenHash st
 		WHERE token_hash = $1
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, tokenHash)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, tokenHash)
 	return scanInvite(row)
 }
 
@@ -71,7 +71,7 @@ func (r *inviteRepositoryImpl) FindPendingByEmail(ctx context.Context, email str
 		ORDER BY created_at DESC
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, email, entity.InviteStatusPending, time.Now())
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, email, entity.InviteStatusPending, time.Now())
 	return scanInvite(row)
 }
 
@@ -81,7 +81,7 @@ func (r *inviteRepositoryImpl) UpdateStatus(ctx context.Context, id uuid.UUID, s
 		SET status = $1, accepted_at = $2
 		WHERE id = $3
 	`
-	_, err := r.db.ExecContext(ctx, query, status, acceptedAt, id)
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, status, acceptedAt, id)
 	return err
 }
 
