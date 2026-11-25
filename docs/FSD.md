@@ -314,19 +314,22 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
   - Jika `events.inventory_mode == "ONLINE_ONLY"`, sistem membuat 1 baris inventory (`channel = "ONLINE"`).
   - Jika `events.inventory_mode == "DUAL_CHANNEL"`, sistem membuat 2 baris inventory (`channel = "ONLINE"` dan `channel = "OFFLINE"`).
 - **Endpoint**:
-  - `GET /api/events/:eventId/ticket-types`: Daftar seluruh kategori tiket pada suatu event beserta rincian `inventories` dan `pricing_phases`.
+  - `GET /api/events/:eventId/ticket-types`: Daftar seluruh kategori tiket pada suatu event beserta rincian `inventories`, `pricing_phases`, dan `seatingType`.
   - `POST /api/events/:eventId/ticket-types`: Membuat kategori tiket baru sekaligus menginisialisasi kuota fisik di `inventories`.
     - **Input**:
       ```json
       {
         "name": "Festival / GA",
         "description": "Free standing area dekat panggung utama",
+        "seatingType": "AREA", // Nilai valid: "AREA" (default) atau "SEATED"
         "onlineQuota": 500,
         "offlineQuota": 100
       }
       ```
   - `PUT /api/events/:eventId/ticket-types/:ticketTypeId`: Memperbarui nama, deskripsi, dan kuota fisik `inventories`.
-    - **Aturan Bisnis**: Kuota baru (`onlineQuota` / `offlineQuota`) **dilarang lebih kecil** dari jumlah tiket yang sudah terjual dan sedang ditahan (`quota >= sold + reserved`). Jika dilanggar, tolak dengan `422 Unprocessable Entity`.
+    - **Aturan Bisnis**:
+      - Kuota baru (`onlineQuota` / `offlineQuota`) **dilarang lebih kecil** dari jumlah tiket yang sudah terjual dan sedang ditahan (`quota >= sold + reserved`). Jika dilanggar, tolak dengan `422 Unprocessable Entity`.
+      - `seatingType` (`AREA` / `SEATED`) **tidak dapat diubah** jika sudah ada tiket yang terjual/ditahan atau sudah memiliki daftar kursi di tabel `seats`.
   - `DELETE /api/events/:eventId/ticket-types/:ticketTypeId`: Menghapus kategori tiket (Hanya diizinkan jika `sold == 0` dan `reserved == 0` di seluruh kanal).
 
 #### F-5.2 Pricing Phase (Gelombang Harga) Management
@@ -367,6 +370,29 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
       - Hanya berlaku untuk event dengan `inventory_mode == "DUAL_CHANNEL"`.
       - Menggunakan `SELECT ... FOR UPDATE` pada baris `inventories` (`channel = "OFFLINE"`). Jika `sold + quantity > quota`, tolak dengan `422 Unprocessable Entity`.
 
+#### F-5.4 Seat Map / Numbered Seat Setup (Kategori `SEATED`)
+- **Akses**:
+  - `GET /api/ticket-types/:ticketTypeId/seats`: Publik (melihat denah daftar kursi dan ketersediaannya).
+  - `POST /api/ticket-types/:ticketTypeId/seats/bulk` & `DELETE /api/ticket-types/:ticketTypeId/seats/:seatId`: `ORGANIZER` (Hanya **Lead Organizer** pemilik `events.organizer_id`).
+- **Endpoint**:
+  - `GET /api/ticket-types/:ticketTypeId/seats`: Daftar seluruh kursi milik kategori tiket tersebut, diurutkan berdasarkan `row_label` dan `seat_number`, beserta status (`AVAILABLE`, `RESERVED`, `SOLD`).
+  - `POST /api/ticket-types/:ticketTypeId/seats/bulk`: Generate daftar kursi bernomor secara massal per baris.
+    - **Input**:
+      ```json
+      {
+        "rows": [
+          { "rowLabel": "A", "count": 20 },
+          { "rowLabel": "B", "count": 20 }
+        ]
+      }
+      ```
+    - **Aturan Bisnis**:
+      - Hanya diizinkan jika `ticket_types.seating_type == "SEATED"` (jika `AREA`, tolak dengan `422 Unprocessable Entity`).
+      - Total jumlah kursi yang dibuat pada kategori tersebut **tidak boleh melebihi** `inventories.quota` kanal `ONLINE` (jika melebihi, tolak dengan `422 Unprocessable Entity`).
+      - Kombinasi `(ticket_type_id, row_label, seat_number)` bersifat unik; jika terdapat duplikat baris/nomor kursi, tolak dengan `409 Conflict`.
+      - Setiap kursi menyimpan `label` (contoh: `"A-1"`, `"A-2"`) dengan status awal `AVAILABLE`.
+  - `DELETE /api/ticket-types/:ticketTypeId/seats/:seatId`: Menghapus kursi tertentu (Hanya diizinkan jika `seats.status == "AVAILABLE"`).
+
 ---
 
 ### FD-6.0: Order, Checkout, Payment Webhook & E-Ticket (QR) Lifecycle
@@ -386,7 +412,8 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
       {
         "ticketTypeId": "uuid-ticket-type",
         "pricingPhaseId": "uuid-pricing-phase",
-        "quantity": 2
+        "quantity": 2,
+        "seatIds": ["uuid-seat-1", "uuid-seat-2"] // Wajib untuk kategori SEATED (jumlah == quantity); kosongkan untuk kategori AREA
       }
     ],
     "paymentMethod": "QRIS"
@@ -394,13 +421,16 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
   ```
 - **Aturan Bisnis & Concurrency Control**:
   1. Event wajib berstatus `PUBLISHED`, dan `pricing_phase` yang dipilih wajib sedang berada dalam rentang waktu aktif (`start_at <= now() <= end_at`).
-  2. Membuka transaksi database (`tx`) dan mengunci baris `inventories` (`channel = "ONLINE"`) serta `pricing_phases` menggunakan **`SELECT ... FOR UPDATE`** untuk mencegah *race condition / overselling*.
-  3. Validasi ketersediaan kuota:
+  2. Validasi tipe kursi kategori tiket (`ticket_types.seating_type`):
+     - Jika `SEATED`: `seatIds` wajib diisi dengan jumlah tepat sama dengan `quantity` dan tidak boleh ada duplikat ID.
+     - Jika `AREA`: `seatIds` wajib kosong/tidak dikirim (`400 Bad Request` jika disertakan).
+  3. Membuka transaksi database (`tx`) dan mengunci baris `inventories` (`channel = "ONLINE"`) serta `pricing_phases` menggunakan **`SELECT ... FOR UPDATE`** untuk mencegah *race condition / overselling*. Khusus kategori `SEATED`, kunci juga baris `seats` yang dipilih dengan `SELECT ... FOR UPDATE` **terurut berdasarkan `seats.id`** (mencegah *deadlock*), pastikan seluruh kursi milik `ticketTypeId` tersebut dan berstatus `AVAILABLE` (jika ada yang tidak tersedia, tolak dengan `409 Conflict`).
+  4. Validasi ketersediaan kuota:
      - `inventories.sold + inventories.reserved + quantity <= inventories.quota`
      - `pricing_phases.sold + quantity <= pricing_phases.quota`
      - Jika kuota tidak mencukupi, batalkan transaksi dan kembalikan `422 Unprocessable Entity`.
-  4. Tambahkan `inventories.reserved += quantity`.
-  5. Simpan snapshot transaksi ke tabel `orders` (`status = "PENDING"`, `total_amount` tipe `NUMERIC(15, 2)`, `expires_at = now() + 15 minutes`), `order_items` (`unit_price` dan `subtotal` immutable), serta `payments` (`status = "PENDING"`).
+  5. Tambahkan `inventories.reserved += quantity`. Untuk kategori `SEATED`, ubah status `seats` menjadi `RESERVED` dengan `reserved_by_order_id = order.id` dan `reserved_until = order.expires_at`.
+  6. Simpan snapshot transaksi ke tabel `orders` (`status = "PENDING"`, `total_amount` tipe `NUMERIC(15, 2)`, `expires_at = now() + 15 minutes`), `order_items` (`unit_price` dan `subtotal` immutable), serta `payments` (`status = "PENDING"`).
 
 #### F-6.2 Order History, Detail & Reservation Expiry Release
 - **Akses**: `USER` (Pemilik pesanan) dan `ADMIN`/`SUPER_ADMIN`.
@@ -409,7 +439,7 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
   - `GET /api/orders/:id`: Detail pesanan beserta rincian `order_items`, status `payments`, dan daftar `tickets` (termasuk `qrToken` jika pesanan sudah `PAID`).
   - `POST /api/orders/:id/cancel`: Membatalkan pesanan yang masih berstatus `PENDING` secara mandiri.
 - **Aturan Bisnis Expiration (TTL 15 Menit)**:
-  - Jika pesanan `PENDING` telah melewati `expires_at` (atau dibatalkan pengguna), status `orders` dan `payments` diubah menjadi `EXPIRED` / `CANCELLED`, dan kuota yang ditahan dikembalikan ke `inventories` (`inventories.reserved -= quantity`) di dalam transaksi database.
+  - Jika pesanan `PENDING` telah melewati `expires_at` (atau dibatalkan pengguna), status `orders` dan `payments` diubah menjadi `EXPIRED` / `CANCELLED`, kuota yang ditahan dikembalikan ke `inventories` (`inventories.reserved -= quantity`), dan kursi terkait (`seats.reserved_by_order_id == order.id`) dikembalikan ke `status = "AVAILABLE"` (`reserved_by_order_id = NULL`, `reserved_until = NULL`) dalam satu transaksi database.
 
 #### F-6.3 Payment Webhook & E-Ticket (QR) Generation
 - **Akses**: Publik / Payment Gateway Callback (Dilindungi verifikasi signature token provider).
@@ -419,10 +449,10 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
   - **Idempotent**: Jika `orders.status` sudah `PAID`, abaikan pemrosesan ulang dan langsung kembalikan `200 OK`.
   - Jika status pembayaran sukses (`PAID` / `SETTLEMENT`):
     1. Dalam 1 transaksi database (`SELECT ... FOR UPDATE`): ubah `payments.status = "PAID"`, `payments.paid_at = now()`, dan `orders.status = "PAID"`.
-    2. Finalisasi kuota pada `inventories` (`channel = "ONLINE"`): `reserved -= quantity` dan `sold += quantity`, serta tambahkan `pricing_phases.sold += quantity`.
-    3. **Generate E-Ticket (`tickets`)**: Buat record tiket individu sebanyak total `quantity` pada `order_items` dengan `status = "ISSUED"`, `ticket_code` unik, dan `qr_token` yang dienkripsi menggunakan **AES-256-GCM** (memuat payload JSON terenkripsi: `ticketId`, `orderId`, `eventId`).
+    2. Finalisasi kuota pada `inventories` (`channel = "ONLINE"`): `reserved -= quantity` dan `sold += quantity`, serta tambahkan `pricing_phases.sold += quantity`. Untuk item kategori `SEATED`, ubah status kursi terkait di `seats` menjadi `SOLD`.
+    3. **Generate E-Ticket (`tickets`)**: Buat record tiket individu sebanyak total `quantity` pada `order_items` dengan `status = "ISSUED"`, `ticket_code` unik, `seat_id` (jika kategori `SEATED`), dan `qr_token` yang dienkripsi menggunakan **AES-256-GCM** (memuat payload JSON terenkripsi: `ticketId`, `orderId`, `eventId`).
     4. Kirim email bukti pembayaran & e-ticket ke `orders.buyer_email`.
-  - Jika status pembayaran gagal/kedaluwarsa (`EXPIRED` / `FAILED`) dan pesanan masih `PENDING`: ubah status menjadi `EXPIRED` dan lepaskan `inventories.reserved -= quantity`.
+  - Jika status pembayaran gagal/kedaluwarsa (`EXPIRED` / `FAILED`) dan pesanan masih `PENDING`: ubah status menjadi `EXPIRED`, lepaskan `inventories.reserved -= quantity`, dan kembalikan status kursi terkait di `seats` menjadi `AVAILABLE`.
 
 #### F-6.4 Gate Check-In & QR Ticket Validation
 - **Akses**: `ORGANIZER` (Lead Organizer & Co-Organizer) dan `STAFF` yang ditugaskan pada event terkait di tabel `event_organizers`.
@@ -439,4 +469,4 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
   2. Dekripsi `qrToken` menggunakan **AES-256-GCM**. Jika gagal didekripsi atau `eventId` di dalam payload tidak cocok dengan `:eventId` pada URL, tolak dengan `400 Bad Request` ("Tiket tidak valid atau palsu").
   3. Kunci baris `tickets` dengan `SELECT ... FOR UPDATE`:
      - Jika `tickets.status == "USED"`, tolak dengan `409 Conflict` beserta waktu `checked_in_at` sebelumnya ("Tiket sudah digunakan").
-     - Jika `tickets.status == "ISSUED"`, ubah status menjadi `USED`, set `checked_in_at = now()`, dan kembalikan detail pemilik tiket serta kategori tiket (`200 OK`).
+     - Jika `tickets.status == "ISSUED"`, ubah status menjadi `USED`, set `checked_in_at = now()`, dan kembalikan detail pemilik tiket, kategori tiket, serta label kursi jika kategori `SEATED` (`200 OK`).
