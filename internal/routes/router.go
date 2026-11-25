@@ -31,6 +31,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	sessionRepo := postgres.NewSessionRepository(config.SqlDB)
 	inviteRepo := postgres.NewInviteRepository(config.SqlDB)
 	organizerRepo := postgres.NewOrganizerRepository(config.SqlDB)
+	eventRepo := postgres.NewEventRepository(config.SqlDB)
 	tx := postgres.NewTransactor(config.SqlDB)
 	otpRepo := redis.NewOTPRepository(config.RedisClient)
 	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
@@ -42,12 +43,14 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, tx, emailSender, storageService, cfg)
 	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, emailSender, storageService, cfg)
+	eventUsecase := usecase.NewEventUsecase(eventRepo, organizerRepo, userRepo)
 
 	helloHandler := handler.NewHelloHandler(helloUsecase)
 	roleHandler := handler.NewRoleHandler(roleUsecase)
 	authHandler := handler.NewAuthHandler(authUsecase, cfg)
 	userHandler := handler.NewUserHandler(userUsecase)
 	organizerHandler := handler.NewOrganizerHandler(organizerUsecase)
+	eventHandler := handler.NewEventHandler(eventUsecase)
 
 	api := r.Group("/api")
 	{
@@ -56,6 +59,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		RoleRoute(api, roleHandler)
 		UserRoute(api, userHandler, cfg.JWTSecret, roleRepo)
 		OrganizerRoute(api, organizerHandler, cfg.JWTSecret, roleRepo, rateLimiter)
+		EventRoute(api, eventHandler)
 
 		// TODO: delete it in when it goes to main
 		DevRoute(api, cfg)
