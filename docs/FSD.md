@@ -181,7 +181,7 @@ Seluruh endpoint `GET` berbasis daftar/tabel wajib mendukung parameter kueri sta
 - **Endpoint**:
   - `GET /api/organizers/profile`: Mendapatkan data profil organisasi dari organizer yang sedang login (termasuk email dari akun `users`).
   - `PUT /api/organizers/profile`: Membuat atau memperbarui profil organisasi.
-  - `GET /api/organizers/:id`: Mendapatkan informasi publik profil organizer berdasarkan ID profil / user organizer.
+  - `GET /api/organizers/:id`: Mendapatkan informasi publik profil organizer berdasarkan ID profil / user organizer. Respons publik **tidak menyertakan email login** organizer (`email` hanya tersedia pada `GET /api/organizers/profile` milik organizer yang bersangkutan).
 - **Content-Type (`PUT /api/organizers/profile`)**: `multipart/form-data` atau `application/json`.
 - **Input (`PUT /api/organizers/profile`)**:
   - `orgName`: string (wajib, min 3, max 100).

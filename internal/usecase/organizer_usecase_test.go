@@ -82,8 +82,8 @@ func TestOrganizerUsecase_UpsertProfile(t *testing.T) {
 		if res.OrgName != "SoundRhythm Live" {
 			t.Errorf("expected OrgName SoundRhythm Live, got %s", res.OrgName)
 		}
-		if res.Email != "contact@soundrhythm.com" {
-			t.Errorf("expected Email contact@soundrhythm.com, got %s", res.Email)
+		if res.Email == nil || *res.Email != "contact@soundrhythm.com" {
+			t.Errorf("expected Email contact@soundrhythm.com, got %v", res.Email)
 		}
 		if res.LogoURL == nil || *res.LogoURL == "" {
 			t.Errorf("expected LogoURL to be set")
@@ -150,8 +150,8 @@ func TestOrganizerUsecase_GetProfile(t *testing.T) {
 		if res.OrgName != "SoundRhythm Live" {
 			t.Errorf("expected OrgName SoundRhythm Live, got %s", res.OrgName)
 		}
-		if res.Email != "contact@soundrhythm.com" {
-			t.Errorf("expected Email contact@soundrhythm.com, got %s", res.Email)
+		if res.Email == nil || *res.Email != "contact@soundrhythm.com" {
+			t.Errorf("expected Email contact@soundrhythm.com, got %v", res.Email)
 		}
 	})
 }
@@ -197,6 +197,9 @@ func TestOrganizerUsecase_GetPublicProfile(t *testing.T) {
 		}
 		if res.OrgName != "SoundRhythm Public" {
 			t.Errorf("expected OrgName SoundRhythm Public, got %s", res.OrgName)
+		}
+		if res.Email != nil {
+			t.Errorf("expected public profile to omit email, got %v", *res.Email)
 		}
 	})
 

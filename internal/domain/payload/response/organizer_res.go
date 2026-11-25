@@ -10,7 +10,7 @@ type OrganizerProfileResponse struct {
 	ID          uuid.UUID `json:"id"`
 	UserID      uuid.UUID `json:"userId"`
 	OrgName     string    `json:"orgName"`
-	Email       string    `json:"email"`
+	Email       *string   `json:"email,omitempty"`
 	LogoURL     *string   `json:"logoUrl,omitempty"`
 	Description *string   `json:"description,omitempty"`
 	Phone       *string   `json:"phone,omitempty"`
