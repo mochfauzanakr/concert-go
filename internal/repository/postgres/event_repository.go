@@ -233,28 +233,139 @@ func (r *eventRepositoryImpl) FindArtistsByEventID(ctx context.Context, eventID 
 
 	artists := make([]*entity.Artist, 0)
 	for rows.Next() {
-		var a entity.Artist
-		var bio, avatarURL sql.NullString
-		var createdAt, updatedAt sql.NullTime
-
-		if err := rows.Scan(&a.ID, &a.Name, &bio, &avatarURL, &createdAt, &updatedAt); err != nil {
+		a, err := scanArtist(rows)
+		if err != nil {
 			return nil, err
 		}
-		if bio.Valid {
-			a.Bio = &bio.String
+		if a != nil {
+			artists = append(artists, a)
 		}
-		if avatarURL.Valid {
-			a.AvatarURL = &avatarURL.String
-		}
-		if createdAt.Valid {
-			a.CreatedAt = createdAt.Time
-		}
-		if updatedAt.Valid {
-			a.UpdatedAt = updatedAt.Time
-		}
-		artists = append(artists, &a)
 	}
 	return artists, rows.Err()
+}
+
+func (r *eventRepositoryImpl) FindAllArtists(ctx context.Context, filter repository.ArtistFilter) ([]*entity.Artist, int, error) {
+	where := []string{"1=1"}
+	var args []any
+	argIdx := 1
+
+	if filter.Search != "" {
+		where = append(where, fmt.Sprintf("LOWER(name) LIKE $%d", argIdx))
+		args = append(args, "%"+strings.ToLower(filter.Search)+"%")
+		argIdx++
+	}
+	if filter.StartDate != nil {
+		where = append(where, fmt.Sprintf("created_at >= $%d", argIdx))
+		args = append(args, *filter.StartDate)
+		argIdx++
+	}
+	if filter.EndDate != nil {
+		where = append(where, fmt.Sprintf("created_at <= $%d", argIdx))
+		args = append(args, *filter.EndDate)
+		argIdx++
+	}
+
+	whereClause := strings.Join(where, " AND ")
+
+	var total int
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM artists WHERE %s", whereClause)
+	if err := execer(ctx, r.db).QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		log.Printf("[SQL Error - Count Artists] %v", err)
+		return nil, 0, err
+	}
+
+	sortCol := model.ResolveSortColumn(filter.SortBy, map[string]string{
+		"name":       "name",
+		"createdat":  "created_at",
+		"created_at": "created_at",
+	}, "created_at")
+	sortOrder := model.ResolveSortOrder(filter.SortOrder)
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	dataQuery := fmt.Sprintf(`
+		SELECT id, name, bio, avatar_url, created_at, updated_at
+		FROM artists
+		WHERE %s
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, whereClause, sortCol, sortOrder, argIdx, argIdx+1)
+
+	rows, err := execer(ctx, r.db).QueryContext(ctx, dataQuery, append(args, limit, filter.Offset)...)
+	if err != nil {
+		log.Printf("[SQL Error - Query Artists] %v", err)
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	artists := make([]*entity.Artist, 0)
+	for rows.Next() {
+		a, err := scanArtist(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		if a != nil {
+			artists = append(artists, a)
+		}
+	}
+	return artists, total, rows.Err()
+}
+
+func (r *eventRepositoryImpl) FindArtistByID(ctx context.Context, id uuid.UUID) (*entity.Artist, error) {
+	query := `SELECT id, name, bio, avatar_url, created_at, updated_at FROM artists WHERE id = $1 LIMIT 1`
+	return scanArtist(execer(ctx, r.db).QueryRowContext(ctx, query, id))
+}
+
+func (r *eventRepositoryImpl) CreateArtist(ctx context.Context, artist *entity.Artist) error {
+	now := time.Now()
+	if artist.ID == uuid.Nil {
+		artist.ID = uuid.New()
+	}
+	artist.CreatedAt = now
+	artist.UpdatedAt = now
+
+	query := `
+		INSERT INTO artists (id, name, bio, avatar_url, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
+		artist.ID,
+		artist.Name,
+		artist.Bio,
+		artist.AvatarURL,
+		artist.CreatedAt,
+		artist.UpdatedAt,
+	)
+	if err != nil {
+		log.Printf("[SQL Error - Artist Create] %v", err)
+	}
+	return err
+}
+
+func (r *eventRepositoryImpl) IsEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM event_artists WHERE event_id = $1 AND artist_id = $2)`
+	var exists bool
+	err := execer(ctx, r.db).QueryRowContext(ctx, query, eventID, artistID).Scan(&exists)
+	return exists, err
+}
+
+func (r *eventRepositoryImpl) AddEventArtist(ctx context.Context, eventID, artistID uuid.UUID) error {
+	query := `INSERT INTO event_artists (event_id, artist_id) VALUES ($1, $2) ON CONFLICT (event_id, artist_id) DO NOTHING`
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, eventID, artistID)
+	return err
+}
+
+func (r *eventRepositoryImpl) RemoveEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error) {
+	query := `DELETE FROM event_artists WHERE event_id = $1 AND artist_id = $2`
+	res, err := execer(ctx, r.db).ExecContext(ctx, query, eventID, artistID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
 }
 
 func (r *eventRepositoryImpl) FindCoOrganizersByEventID(ctx context.Context, eventID uuid.UUID) ([]*repository.EventCoOrganizer, error) {
@@ -334,4 +445,32 @@ func scanEvent(row interface{ Scan(dest ...any) error }) (*entity.Event, error) 
 	}
 
 	return &ev, nil
+}
+
+func scanArtist(row interface{ Scan(dest ...any) error }) (*entity.Artist, error) {
+	var a entity.Artist
+	var bio, avatarURL sql.NullString
+	var createdAt, updatedAt sql.NullTime
+
+	err := row.Scan(&a.ID, &a.Name, &bio, &avatarURL, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		log.Printf("[SQL Error - Scan Artist] %v", err)
+		return nil, err
+	}
+	if bio.Valid {
+		a.Bio = &bio.String
+	}
+	if avatarURL.Valid {
+		a.AvatarURL = &avatarURL.String
+	}
+	if createdAt.Valid {
+		a.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		a.UpdatedAt = updatedAt.Time
+	}
+	return &a, nil
 }

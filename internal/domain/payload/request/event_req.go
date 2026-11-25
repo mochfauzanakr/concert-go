@@ -29,3 +29,16 @@ type UpsertEventRequest struct {
 type UpdateEventStatusRequest struct {
 	Status string `json:"status"`
 }
+
+type GetArtistListRequest struct {
+	model.BaseListParams
+}
+
+type CreateArtistRequest struct {
+	Name string `json:"name"`
+	Bio  string `json:"bio"`
+}
+
+type AddEventArtistRequest struct {
+	ArtistID string `json:"artistId"`
+}

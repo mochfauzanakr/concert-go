@@ -269,6 +269,123 @@ func (m *EventRepositoryMock) FindArtistsByEventID(ctx context.Context, eventID 
 	return artists, nil
 }
 
+func (m *EventRepositoryMock) FindAllArtists(ctx context.Context, filter repository.ArtistFilter) ([]*entity.Artist, int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	searchLower := strings.ToLower(strings.TrimSpace(filter.Search))
+	var filtered []*entity.Artist
+	for _, a := range m.artists {
+		if searchLower != "" && !strings.Contains(strings.ToLower(a.Name), searchLower) {
+			continue
+		}
+		if filter.StartDate != nil && a.CreatedAt.Before(*filter.StartDate) {
+			continue
+		}
+		if filter.EndDate != nil && a.CreatedAt.After(*filter.EndDate) {
+			continue
+		}
+		copyArtist := *a
+		filtered = append(filtered, &copyArtist)
+	}
+
+	asc := strings.EqualFold(strings.TrimSpace(filter.SortOrder), "ASC")
+	sortBy := strings.ToLower(strings.TrimSpace(filter.SortBy))
+	sort.Slice(filtered, func(i, j int) bool {
+		var less bool
+		switch sortBy {
+		case "name":
+			less = strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+		default:
+			less = filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+		}
+		if asc {
+			return less
+		}
+		return !less
+	})
+
+	total := len(filtered)
+	start := filter.Offset
+	if start > total {
+		start = total
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	return filtered[start:end], total, nil
+}
+
+func (m *EventRepositoryMock) FindArtistByID(ctx context.Context, id uuid.UUID) (*entity.Artist, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if a, ok := m.artists[id]; ok {
+		copyArtist := *a
+		return &copyArtist, nil
+	}
+	return nil, nil
+}
+
+func (m *EventRepositoryMock) CreateArtist(ctx context.Context, artist *entity.Artist) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	if artist.ID == uuid.Nil {
+		artist.ID = uuid.New()
+	}
+	artist.CreatedAt = now
+	artist.UpdatedAt = now
+	copyArtist := *artist
+	m.artists[artist.ID] = &copyArtist
+	return nil
+}
+
+func (m *EventRepositoryMock) IsEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, id := range m.eventArtists[eventID] {
+		if id == artistID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *EventRepositoryMock) AddEventArtist(ctx context.Context, eventID, artistID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, id := range m.eventArtists[eventID] {
+		if id == artistID {
+			return nil
+		}
+	}
+	m.eventArtists[eventID] = append(m.eventArtists[eventID], artistID)
+	return nil
+}
+
+func (m *EventRepositoryMock) RemoveEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	list := m.eventArtists[eventID]
+	for i, id := range list {
+		if id == artistID {
+			m.eventArtists[eventID] = append(list[:i], list[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *EventRepositoryMock) FindCoOrganizersByEventID(ctx context.Context, eventID uuid.UUID) ([]*repository.EventCoOrganizer, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

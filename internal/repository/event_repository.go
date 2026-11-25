@@ -23,6 +23,16 @@ type EventFilter struct {
 	Offset          int
 }
 
+type ArtistFilter struct {
+	Search    string
+	StartDate *time.Time
+	EndDate   *time.Time
+	SortBy    string
+	SortOrder string
+	Limit     int
+	Offset    int
+}
+
 type EventCoOrganizer struct {
 	UserID     uuid.UUID
 	Name       string
@@ -39,4 +49,10 @@ type EventRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	FindArtistsByEventID(ctx context.Context, eventID uuid.UUID) ([]*entity.Artist, error)
 	FindCoOrganizersByEventID(ctx context.Context, eventID uuid.UUID) ([]*EventCoOrganizer, error)
+	FindAllArtists(ctx context.Context, filter ArtistFilter) ([]*entity.Artist, int, error)
+	FindArtistByID(ctx context.Context, id uuid.UUID) (*entity.Artist, error)
+	CreateArtist(ctx context.Context, artist *entity.Artist) error
+	IsEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error)
+	AddEventArtist(ctx context.Context, eventID, artistID uuid.UUID) error
+	RemoveEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error)
 }

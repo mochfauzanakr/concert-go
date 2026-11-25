@@ -185,3 +185,95 @@ func (h *EventHandler) UpdateEventStatus(c *gin.Context) {
 
 	util.RespondOK(c, "Event status updated successfully", res, nil)
 }
+
+func (h *EventHandler) GetArtists(c *gin.Context) {
+	req := request.GetArtistListRequest{
+		BaseListParams: util.ParseBaseListParams(c),
+	}
+
+	res, err := h.eventUsecase.GetArtists(c.Request.Context(), req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Artists fetched successfully", res.Items, &res.Pagination)
+}
+
+func (h *EventHandler) CreateArtist(c *gin.Context) {
+	var req request.CreateArtistRequest
+	var avatarHeader *multipart.FileHeader
+
+	contentType := c.GetHeader("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		req.Name = c.PostForm("name")
+		req.Bio = c.PostForm("bio")
+		if file, err := c.FormFile("avatar"); err == nil {
+			avatarHeader = file
+		}
+	} else {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			util.RespondBadRequest(c, "Invalid input payload", err.Error())
+			return
+		}
+	}
+
+	res, err := h.eventUsecase.CreateArtist(c.Request.Context(), req, avatarHeader)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondCreated(c, "Artist created successfully", res)
+}
+
+func (h *EventHandler) AddEventArtist(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	eventID, ok := parseUUIDParam(c, "id", "event ID")
+	if !ok {
+		return
+	}
+
+	var req request.AddEventArtistRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	res, err := h.eventUsecase.AddEventArtist(c.Request.Context(), session.UserID, session.RoleID, eventID, req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondCreated(c, "Artist added to event lineup successfully", res)
+}
+
+func (h *EventHandler) RemoveEventArtist(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	eventID, ok := parseUUIDParam(c, "id", "event ID")
+	if !ok {
+		return
+	}
+	artistID, ok := parseUUIDParam(c, "artistId", "artist ID")
+	if !ok {
+		return
+	}
+
+	if err := h.eventUsecase.RemoveEventArtist(c.Request.Context(), session.UserID, session.RoleID, eventID, artistID); err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Artist removed from event lineup successfully", nil, nil)
+}

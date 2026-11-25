@@ -438,3 +438,183 @@ func (u *EventUsecase) UpdateEventStatus(
 	ev.Status = status
 	return u.buildEventDetail(ctx, ev)
 }
+
+// GetArtists returns paginated master artists (F-4.3).
+func (u *EventUsecase) GetArtists(ctx context.Context, req request.GetArtistListRequest) (*response.PageResponse[response.EventArtistResponse], error) {
+	req.Normalize(20)
+
+	filter := repository.ArtistFilter{
+		Search:    req.Search,
+		StartDate: req.StartDate,
+		EndDate:   req.EndDate,
+		SortBy:    req.SortBy,
+		SortOrder: req.SortOrder,
+		Limit:     req.PageSize,
+		Offset:    model.CalculateOffset(req.Page, req.PageSize),
+	}
+
+	artists, total, err := u.eventRepo.FindAllArtists(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]response.EventArtistResponse, 0, len(artists))
+	for _, a := range artists {
+		items = append(items, response.EventArtistResponse{
+			ID:        a.ID,
+			Name:      a.Name,
+			Bio:       a.Bio,
+			AvatarURL: a.AvatarURL,
+		})
+	}
+	return &response.PageResponse[response.EventArtistResponse]{
+		Items:      items,
+		Pagination: model.BuildPagination(total, req.Page, req.PageSize),
+	}, nil
+}
+
+// CreateArtist creates a master artist profile with optional avatar upload (F-4.3).
+func (u *EventUsecase) CreateArtist(
+	ctx context.Context,
+	req request.CreateArtistRequest,
+	avatarHeader *multipart.FileHeader,
+) (*response.EventArtistResponse, error) {
+	name := strings.TrimSpace(req.Name)
+	if len(name) < 2 || len(name) > 150 {
+		return nil, exception.BadRequest("name must be between 2 and 150 characters")
+	}
+
+	var bioPtr *string
+	if bio := strings.TrimSpace(req.Bio); bio != "" {
+		bioPtr = &bio
+	}
+
+	avatarURL, err := u.uploadOptionalImage(ctx, avatarHeader, "artists")
+	if err != nil {
+		return nil, err
+	}
+
+	artist := &entity.Artist{
+		ID:        uuid.New(),
+		Name:      name,
+		Bio:       bioPtr,
+		AvatarURL: avatarURL,
+	}
+	if err := u.eventRepo.CreateArtist(ctx, artist); err != nil {
+		return nil, err
+	}
+
+	return &response.EventArtistResponse{
+		ID:        artist.ID,
+		Name:      artist.Name,
+		Bio:       artist.Bio,
+		AvatarURL: artist.AvatarURL,
+	}, nil
+}
+
+func (u *EventUsecase) canManageEventLineup(ctx context.Context, actorID uuid.UUID, actorRoleID *int, ev *entity.Event) (bool, error) {
+	if actorRoleID != nil && u.roleRepo != nil {
+		role, err := u.roleRepo.FindByID(ctx, *actorRoleID)
+		if err != nil {
+			return false, err
+		}
+		if role != nil {
+			roleName := strings.ToUpper(role.Name)
+			if roleName == "SUPER_ADMIN" || roleName == "ADMIN" {
+				return true, nil
+			}
+		}
+	}
+	return ev.OrganizerID == actorID, nil
+}
+
+// AddEventArtist attaches an existing artist to an event's lineup (F-4.3).
+func (u *EventUsecase) AddEventArtist(
+	ctx context.Context,
+	actorID uuid.UUID,
+	actorRoleID *int,
+	eventID uuid.UUID,
+	req request.AddEventArtistRequest,
+) (*response.EventArtistResponse, error) {
+	artistID, err := uuid.Parse(strings.TrimSpace(req.ArtistID))
+	if err != nil {
+		return nil, exception.BadRequest("invalid artistId format")
+	}
+
+	ev, err := u.eventRepo.FindByID(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	if ev == nil {
+		return nil, exception.NotFound("event not found")
+	}
+
+	allowed, err := u.canManageEventLineup(ctx, actorID, actorRoleID, ev)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, exception.Forbidden("you do not have permission to manage this event lineup")
+	}
+
+	artist, err := u.eventRepo.FindArtistByID(ctx, artistID)
+	if err != nil {
+		return nil, err
+	}
+	if artist == nil {
+		return nil, exception.NotFound("artist not found")
+	}
+
+	exists, err := u.eventRepo.IsEventArtist(ctx, eventID, artistID)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, exception.Conflict("artist is already in the event lineup")
+	}
+
+	if err := u.eventRepo.AddEventArtist(ctx, eventID, artistID); err != nil {
+		return nil, err
+	}
+
+	return &response.EventArtistResponse{
+		ID:        artist.ID,
+		Name:      artist.Name,
+		Bio:       artist.Bio,
+		AvatarURL: artist.AvatarURL,
+	}, nil
+}
+
+// RemoveEventArtist removes an artist from an event's lineup (F-4.3).
+func (u *EventUsecase) RemoveEventArtist(
+	ctx context.Context,
+	actorID uuid.UUID,
+	actorRoleID *int,
+	eventID uuid.UUID,
+	artistID uuid.UUID,
+) error {
+	ev, err := u.eventRepo.FindByID(ctx, eventID)
+	if err != nil {
+		return err
+	}
+	if ev == nil {
+		return exception.NotFound("event not found")
+	}
+
+	allowed, err := u.canManageEventLineup(ctx, actorID, actorRoleID, ev)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return exception.Forbidden("you do not have permission to manage this event lineup")
+	}
+
+	removed, err := u.eventRepo.RemoveEventArtist(ctx, eventID, artistID)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return exception.NotFound("artist not found in event lineup")
+	}
+	return nil
+}

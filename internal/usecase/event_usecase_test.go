@@ -451,3 +451,80 @@ func TestEventUsecase_F42_EventLifecycle(t *testing.T) {
 		_ = otherDraft
 	})
 }
+
+func TestEventUsecase_F43_ArtistAndLineup(t *testing.T) {
+	ctx := context.Background()
+	uc, eventRepo, organizerRepo, _, roleRepo := setupEventUsecase()
+
+	leadID := uuid.New()
+	otherOrgID := uuid.New()
+	adminID := uuid.New()
+	adminRole, _ := roleRepo.FindByName(ctx, "ADMIN")
+	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+
+	_ = organizerRepo.Upsert(ctx, &entity.OrganizerProfile{UserID: leadID, OrgName: "Lineup Org"})
+	ev := &entity.Event{
+		ID:            uuid.New(),
+		OrganizerID:   leadID,
+		Name:          "Lineup Fest",
+		Description:   "Lineup test",
+		Category:      "Rock",
+		City:          "Jakarta",
+		Location:      "Senayan",
+		StartTime:     time.Now().Add(72 * time.Hour),
+		EndTime:       time.Now().Add(78 * time.Hour),
+		Status:        entity.EventStatusDraft,
+		InventoryMode: entity.InventoryModeOnlineOnly,
+	}
+	eventRepo.SeedEvent(ev)
+
+	artist1, err := uc.CreateArtist(ctx, request.CreateArtistRequest{Name: "Hindia", Bio: "Soloist"}, &multipart.FileHeader{Filename: "a.png", Size: 512})
+	if err != nil {
+		t.Fatalf("expected CreateArtist success, got %v", err)
+	}
+	artist2, err := uc.CreateArtist(ctx, request.CreateArtistRequest{Name: "Feast"}, nil)
+	if err != nil {
+		t.Fatalf("expected CreateArtist 2 success, got %v", err)
+	}
+
+	t.Run("GetArtists supports search and pagination", func(t *testing.T) {
+		res, err := uc.GetArtists(ctx, request.GetArtistListRequest{
+			BaseListParams: model.BaseListParams{Search: "hin"},
+		})
+		if err != nil || len(res.Items) != 1 || res.Items[0].ID != artist1.ID {
+			t.Fatalf("expected Hindia, got res=%+v err=%v", res, err)
+		}
+	})
+
+	t.Run("AddEventArtist allows lead organizer and admin, rejects other organizer (403) and duplicates (409)", func(t *testing.T) {
+		_, err := uc.AddEventArtist(ctx, otherOrgID, &orgRole.ID, ev.ID, request.AddEventArtistRequest{ArtistID: artist1.ID.String()})
+		var appErr *exception.AppException
+		if !errors.As(err, &appErr) || appErr.Code != 403 {
+			t.Fatalf("expected 403 for non-lead organizer, got %v", err)
+		}
+
+		if _, err := uc.AddEventArtist(ctx, leadID, &orgRole.ID, ev.ID, request.AddEventArtistRequest{ArtistID: artist1.ID.String()}); err != nil {
+			t.Fatalf("expected lead organizer AddEventArtist success, got %v", err)
+		}
+
+		_, err = uc.AddEventArtist(ctx, leadID, &orgRole.ID, ev.ID, request.AddEventArtistRequest{ArtistID: artist1.ID.String()})
+		if !errors.As(err, &appErr) || appErr.Code != 409 {
+			t.Fatalf("expected 409 on duplicate artist, got %v", err)
+		}
+
+		if _, err := uc.AddEventArtist(ctx, adminID, &adminRole.ID, ev.ID, request.AddEventArtistRequest{ArtistID: artist2.ID.String()}); err != nil {
+			t.Fatalf("expected admin AddEventArtist success, got %v", err)
+		}
+	})
+
+	t.Run("RemoveEventArtist removes artist and returns 404 when absent", func(t *testing.T) {
+		if err := uc.RemoveEventArtist(ctx, leadID, &orgRole.ID, ev.ID, artist1.ID); err != nil {
+			t.Fatalf("expected RemoveEventArtist success, got %v", err)
+		}
+		err := uc.RemoveEventArtist(ctx, leadID, &orgRole.ID, ev.ID, artist1.ID)
+		var appErr *exception.AppException
+		if !errors.As(err, &appErr) || appErr.Code != 404 {
+			t.Fatalf("expected 404 on removing absent artist, got %v", err)
+		}
+	})
+}

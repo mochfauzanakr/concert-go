@@ -22,6 +22,14 @@ func EventRoute(router *gin.RouterGroup, eventHandler *handler.EventHandler, jwt
 			organizerEvents.PUT("/:id", eventHandler.UpdateEvent)
 			organizerEvents.PATCH("/:id/status", eventHandler.UpdateEventStatus)
 		}
+
+		lineup := events.Group("")
+		lineup.Use(middleware.AuthMiddleware(jwtSecret))
+		lineup.Use(middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN", "ORGANIZER"))
+		{
+			lineup.POST("/:id/artists", eventHandler.AddEventArtist)
+			lineup.DELETE("/:id/artists/:artistId", eventHandler.RemoveEventArtist)
+		}
 	}
 
 	organizers := router.Group("/organizers")
@@ -29,5 +37,17 @@ func EventRoute(router *gin.RouterGroup, eventHandler *handler.EventHandler, jwt
 	organizers.Use(middleware.RequireRole(roleRepo, "ORGANIZER"))
 	{
 		organizers.GET("/events", eventHandler.GetOrganizerEvents)
+	}
+
+	artists := router.Group("/artists")
+	{
+		artists.GET("", eventHandler.GetArtists)
+
+		protected := artists.Group("")
+		protected.Use(middleware.AuthMiddleware(jwtSecret))
+		protected.Use(middleware.RequireRole(roleRepo, "SUPER_ADMIN", "ADMIN", "ORGANIZER"))
+		{
+			protected.POST("", eventHandler.CreateArtist)
+		}
 	}
 }
