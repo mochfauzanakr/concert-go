@@ -42,3 +42,8 @@ type CreateArtistRequest struct {
 type AddEventArtistRequest struct {
 	ArtistID string `json:"artistId"`
 }
+
+type AssignEventTeamRequest struct {
+	UserID      string `json:"userId"`
+	RoleInEvent string `json:"roleInEvent"`
+}

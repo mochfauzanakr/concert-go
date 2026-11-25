@@ -41,6 +41,19 @@ type EventCoOrganizer struct {
 	AssignedAt time.Time
 }
 
+type EventTeamMember struct {
+	ID          uuid.UUID
+	EventID     uuid.UUID
+	UserID      uuid.UUID
+	Name        string
+	Email       string
+	OrgName     *string
+	AvatarURL   *string
+	RoleInEvent string
+	Status      string
+	AssignedAt  time.Time
+}
+
 type EventRepository interface {
 	FindAll(ctx context.Context, filter EventFilter) ([]*entity.Event, int, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*entity.Event, error)
@@ -55,4 +68,8 @@ type EventRepository interface {
 	IsEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error)
 	AddEventArtist(ctx context.Context, eventID, artistID uuid.UUID) error
 	RemoveEventArtist(ctx context.Context, eventID, artistID uuid.UUID) (bool, error)
+	FindTeamByEventID(ctx context.Context, eventID uuid.UUID) ([]*EventTeamMember, error)
+	IsTeamMember(ctx context.Context, eventID, userID uuid.UUID) (bool, error)
+	AddTeamMember(ctx context.Context, member *entity.EventOrganizer) error
+	RemoveTeamMember(ctx context.Context, eventID, userID uuid.UUID) (bool, error)
 }

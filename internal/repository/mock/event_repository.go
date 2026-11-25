@@ -20,6 +20,7 @@ type EventRepositoryMock struct {
 	artists      map[uuid.UUID]*entity.Artist
 	eventArtists map[uuid.UUID][]uuid.UUID
 	coOrganizers map[uuid.UUID][]*repository.EventCoOrganizer
+	teamMembers  map[uuid.UUID][]*entity.EventOrganizer
 }
 
 // NewEventRepositoryMock creates a new in-memory mock EventRepository.
@@ -29,6 +30,7 @@ func NewEventRepositoryMock() *EventRepositoryMock {
 		artists:      make(map[uuid.UUID]*entity.Artist),
 		eventArtists: make(map[uuid.UUID][]uuid.UUID),
 		coOrganizers: make(map[uuid.UUID][]*repository.EventCoOrganizer),
+		teamMembers:  make(map[uuid.UUID][]*entity.EventOrganizer),
 	}
 }
 
@@ -187,6 +189,11 @@ func (m *EventRepositoryMock) isEventManagerLocked(ev *entity.Event, userID uuid
 	}
 	for _, co := range m.coOrganizers[ev.ID] {
 		if co.UserID == userID {
+			return true
+		}
+	}
+	for _, tm := range m.teamMembers[ev.ID] {
+		if tm.UserID == userID && tm.RoleInEvent == entity.EventRoleCoOrganizer {
 			return true
 		}
 	}
@@ -390,14 +397,89 @@ func (m *EventRepositoryMock) FindCoOrganizersByEventID(ctx context.Context, eve
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	list := m.coOrganizers[eventID]
-	result := make([]*repository.EventCoOrganizer, 0, len(list))
-	for _, item := range list {
+	seen := make(map[uuid.UUID]struct{})
+	result := make([]*repository.EventCoOrganizer, 0)
+	for _, item := range m.coOrganizers[eventID] {
 		copyItem := *item
+		seen[item.UserID] = struct{}{}
 		result = append(result, &copyItem)
+	}
+	for _, tm := range m.teamMembers[eventID] {
+		if tm.RoleInEvent != entity.EventRoleCoOrganizer {
+			continue
+		}
+		if _, exists := seen[tm.UserID]; exists {
+			continue
+		}
+		result = append(result, &repository.EventCoOrganizer{
+			UserID:     tm.UserID,
+			AssignedAt: tm.AssignedAt,
+		})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].AssignedAt.Before(result[j].AssignedAt)
 	})
 	return result, nil
+}
+
+func (m *EventRepositoryMock) FindTeamByEventID(ctx context.Context, eventID uuid.UUID) ([]*repository.EventTeamMember, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	list := m.teamMembers[eventID]
+	result := make([]*repository.EventTeamMember, 0, len(list))
+	for _, tm := range list {
+		result = append(result, &repository.EventTeamMember{
+			ID:          tm.ID,
+			EventID:     tm.EventID,
+			UserID:      tm.UserID,
+			RoleInEvent: tm.RoleInEvent,
+			AssignedAt:  tm.AssignedAt,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].AssignedAt.Before(result[j].AssignedAt)
+	})
+	return result, nil
+}
+
+func (m *EventRepositoryMock) IsTeamMember(ctx context.Context, eventID, userID uuid.UUID) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, tm := range m.teamMembers[eventID] {
+		if tm.UserID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *EventRepositoryMock) AddTeamMember(ctx context.Context, member *entity.EventOrganizer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if member.ID == uuid.Nil {
+		member.ID = uuid.New()
+	}
+	if member.AssignedAt.IsZero() {
+		member.AssignedAt = time.Now()
+	}
+	copyMember := *member
+	m.teamMembers[member.EventID] = append(m.teamMembers[member.EventID], &copyMember)
+	return nil
+}
+
+func (m *EventRepositoryMock) RemoveTeamMember(ctx context.Context, eventID, userID uuid.UUID) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	list := m.teamMembers[eventID]
+	for i, tm := range list {
+		if tm.UserID == userID {
+			m.teamMembers[eventID] = append(list[:i], list[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }

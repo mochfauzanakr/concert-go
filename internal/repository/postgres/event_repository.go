@@ -400,6 +400,111 @@ func (r *eventRepositoryImpl) FindCoOrganizersByEventID(ctx context.Context, eve
 	return coOrganizers, rows.Err()
 }
 
+func (r *eventRepositoryImpl) FindTeamByEventID(ctx context.Context, eventID uuid.UUID) ([]*repository.EventTeamMember, error) {
+	query := `
+		SELECT eo.id, eo.event_id, eo.user_id, u.name, u.email, op.org_name, u.avatar_url, eo.role_in_event, u.status, eo.assigned_at
+		FROM event_organizers eo
+		JOIN users u ON u.id = eo.user_id AND u.deleted_at IS NULL
+		LEFT JOIN organizer_profiles op ON op.user_id = eo.user_id
+		WHERE eo.event_id = $1
+		ORDER BY eo.assigned_at ASC
+	`
+	rows, err := execer(ctx, r.db).QueryContext(ctx, query, eventID)
+	if err != nil {
+		log.Printf("[SQL Error - Query Event Team] %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]*repository.EventTeamMember, 0)
+	for rows.Next() {
+		var m repository.EventTeamMember
+		var orgName, avatarURL sql.NullString
+
+		if err := rows.Scan(&m.ID, &m.EventID, &m.UserID, &m.Name, &m.Email, &orgName, &avatarURL, &m.RoleInEvent, &m.Status, &m.AssignedAt); err != nil {
+			return nil, err
+		}
+		if orgName.Valid {
+			m.OrgName = &orgName.String
+		}
+		if avatarURL.Valid {
+			m.AvatarURL = &avatarURL.String
+		}
+		members = append(members, &m)
+	}
+	return members, rows.Err()
+}
+
+func (r *eventRepositoryImpl) IsTeamMember(ctx context.Context, eventID, userID uuid.UUID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM event_organizers WHERE event_id = $1 AND user_id = $2)`
+	var exists bool
+	err := execer(ctx, r.db).QueryRowContext(ctx, query, eventID, userID).Scan(&exists)
+	return exists, err
+}
+
+func (r *eventRepositoryImpl) AddTeamMember(ctx context.Context, member *entity.EventOrganizer) error {
+	if member.ID == uuid.Nil {
+		member.ID = uuid.New()
+	}
+	if member.AssignedAt.IsZero() {
+		member.AssignedAt = time.Now()
+	}
+
+	query := `
+		INSERT INTO event_organizers (id, event_id, user_id, role_in_event, assigned_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
+		member.ID,
+		member.EventID,
+		member.UserID,
+		member.RoleInEvent,
+		member.AssignedAt,
+	)
+	if err != nil {
+		log.Printf("[SQL Error - Add Event Team Member] %v", err)
+	}
+	return err
+}
+
+func (r *eventRepositoryImpl) RemoveTeamMember(ctx context.Context, eventID, userID uuid.UUID) (bool, error) {
+	query := `DELETE FROM event_organizers WHERE event_id = $1 AND user_id = $2`
+	res, err := execer(ctx, r.db).ExecContext(ctx, query, eventID, userID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
+}
+
+func scanArtist(row interface{ Scan(dest ...any) error }) (*entity.Artist, error) {
+	var a entity.Artist
+	var bio, avatarURL sql.NullString
+	var createdAt, updatedAt sql.NullTime
+
+	err := row.Scan(&a.ID, &a.Name, &bio, &avatarURL, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		log.Printf("[SQL Error - Scan Artist] %v", err)
+		return nil, err
+	}
+	if bio.Valid {
+		a.Bio = &bio.String
+	}
+	if avatarURL.Valid {
+		a.AvatarURL = &avatarURL.String
+	}
+	if createdAt.Valid {
+		a.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		a.UpdatedAt = updatedAt.Time
+	}
+	return &a, nil
+}
+
 func scanEvent(row interface{ Scan(dest ...any) error }) (*entity.Event, error) {
 	var ev entity.Event
 	var bannerURL sql.NullString
@@ -445,32 +550,4 @@ func scanEvent(row interface{ Scan(dest ...any) error }) (*entity.Event, error) 
 	}
 
 	return &ev, nil
-}
-
-func scanArtist(row interface{ Scan(dest ...any) error }) (*entity.Artist, error) {
-	var a entity.Artist
-	var bio, avatarURL sql.NullString
-	var createdAt, updatedAt sql.NullTime
-
-	err := row.Scan(&a.ID, &a.Name, &bio, &avatarURL, &createdAt, &updatedAt)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		log.Printf("[SQL Error - Scan Artist] %v", err)
-		return nil, err
-	}
-	if bio.Valid {
-		a.Bio = &bio.String
-	}
-	if avatarURL.Valid {
-		a.AvatarURL = &avatarURL.String
-	}
-	if createdAt.Valid {
-		a.CreatedAt = createdAt.Time
-	}
-	if updatedAt.Valid {
-		a.UpdatedAt = updatedAt.Time
-	}
-	return &a, nil
 }

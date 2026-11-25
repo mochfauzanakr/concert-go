@@ -21,6 +21,9 @@ func EventRoute(router *gin.RouterGroup, eventHandler *handler.EventHandler, jwt
 			organizerEvents.POST("", eventHandler.CreateEvent)
 			organizerEvents.PUT("/:id", eventHandler.UpdateEvent)
 			organizerEvents.PATCH("/:id/status", eventHandler.UpdateEventStatus)
+			organizerEvents.GET("/:id/team", eventHandler.GetEventTeam)
+			organizerEvents.POST("/:id/team", eventHandler.AssignEventTeam)
+			organizerEvents.DELETE("/:id/team/:userId", eventHandler.RemoveEventTeam)
 		}
 
 		lineup := events.Group("")

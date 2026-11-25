@@ -68,3 +68,16 @@ type EventDetailResponse struct {
 	CreatedAt     time.Time                      `json:"createdAt"`
 	UpdatedAt     time.Time                      `json:"updatedAt"`
 }
+
+type EventTeamMemberResponse struct {
+	ID          uuid.UUID `json:"id"`
+	EventID     uuid.UUID `json:"eventId"`
+	UserID      uuid.UUID `json:"userId"`
+	Name        string    `json:"name"`
+	Email       string    `json:"email"`
+	OrgName     *string   `json:"orgName,omitempty"`
+	AvatarURL   *string   `json:"avatarUrl,omitempty"`
+	RoleInEvent string    `json:"roleInEvent"`
+	Status      string    `json:"status"`
+	AssignedAt  time.Time `json:"assignedAt"`
+}

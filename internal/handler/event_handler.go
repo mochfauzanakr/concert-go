@@ -277,3 +277,75 @@ func (h *EventHandler) RemoveEventArtist(c *gin.Context) {
 
 	util.RespondOK(c, "Artist removed from event lineup successfully", nil, nil)
 }
+
+func (h *EventHandler) GetEventTeam(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	eventID, ok := parseUUIDParam(c, "id", "event ID")
+	if !ok {
+		return
+	}
+
+	res, err := h.eventUsecase.GetEventTeam(c.Request.Context(), session.UserID, eventID)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Event team fetched successfully", res, nil)
+}
+
+func (h *EventHandler) AssignEventTeam(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	eventID, ok := parseUUIDParam(c, "id", "event ID")
+	if !ok {
+		return
+	}
+
+	var req request.AssignEventTeamRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.RespondBadRequest(c, "Invalid input payload", err.Error())
+		return
+	}
+
+	res, err := h.eventUsecase.AssignEventTeam(c.Request.Context(), session.UserID, eventID, req)
+	if err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondCreated(c, "Team member assigned to event successfully", res)
+}
+
+func (h *EventHandler) RemoveEventTeam(c *gin.Context) {
+	session, ok := middleware.GetUserSession(c)
+	if !ok || session == nil {
+		util.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	eventID, ok := parseUUIDParam(c, "id", "event ID")
+	if !ok {
+		return
+	}
+	targetUserID, ok := parseUUIDParam(c, "userId", "user ID")
+	if !ok {
+		return
+	}
+
+	if err := h.eventUsecase.RemoveEventTeam(c.Request.Context(), session.UserID, eventID, targetUserID); err != nil {
+		util.RespondError(c, err)
+		return
+	}
+
+	util.RespondOK(c, "Team member removed from event successfully", nil, nil)
+}

@@ -618,3 +618,194 @@ func (u *EventUsecase) RemoveEventArtist(
 	}
 	return nil
 }
+
+// GetEventTeam lists assigned CO_ORGANIZER and STAFF members for an event (F-4.4).
+func (u *EventUsecase) GetEventTeam(ctx context.Context, organizerID, eventID uuid.UUID) ([]response.EventTeamMemberResponse, error) {
+	ev, err := u.eventRepo.FindByID(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	if ev == nil {
+		return nil, exception.NotFound("event not found")
+	}
+	if ev.OrganizerID != organizerID {
+		return nil, exception.Forbidden("only the lead organizer can view event team")
+	}
+
+	members, err := u.eventRepo.FindTeamByEventID(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]response.EventTeamMemberResponse, 0, len(members))
+	for _, m := range members {
+		item := response.EventTeamMemberResponse{
+			ID:          m.ID,
+			EventID:     m.EventID,
+			UserID:      m.UserID,
+			Name:        m.Name,
+			Email:       m.Email,
+			OrgName:     m.OrgName,
+			AvatarURL:   m.AvatarURL,
+			RoleInEvent: m.RoleInEvent,
+			Status:      m.Status,
+			AssignedAt:  m.AssignedAt,
+		}
+		if item.Name == "" && u.userRepo != nil {
+			if user, err := u.userRepo.FindByID(ctx, m.UserID); err == nil && user != nil {
+				item.Name = user.Name
+				item.Email = user.Email
+				item.AvatarURL = user.AvatarURL
+				item.Status = user.Status
+			}
+		}
+		if item.OrgName == nil && item.RoleInEvent == entity.EventRoleCoOrganizer && u.organizerRepo != nil {
+			if profile, err := u.organizerRepo.FindByUserID(ctx, m.UserID); err == nil && profile != nil {
+				orgName := profile.OrgName
+				item.OrgName = &orgName
+			}
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+// AssignEventTeam assigns an active STAFF (owned by lead organizer) or CO_ORGANIZER to an event (F-4.4).
+func (u *EventUsecase) AssignEventTeam(
+	ctx context.Context,
+	organizerID uuid.UUID,
+	eventID uuid.UUID,
+	req request.AssignEventTeamRequest,
+) (*response.EventTeamMemberResponse, error) {
+	ev, err := u.eventRepo.FindByID(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	if ev == nil {
+		return nil, exception.NotFound("event not found")
+	}
+	if ev.OrganizerID != organizerID {
+		return nil, exception.Forbidden("only the lead organizer can assign event team members")
+	}
+
+	targetUserID, err := uuid.Parse(strings.TrimSpace(req.UserID))
+	if err != nil {
+		return nil, exception.BadRequest("invalid userId format")
+	}
+
+	roleInEvent := strings.ToUpper(strings.TrimSpace(req.RoleInEvent))
+	if roleInEvent != entity.EventRoleCoOrganizer && roleInEvent != entity.EventRoleStaff {
+		return nil, exception.BadRequest("roleInEvent must be CO_ORGANIZER or STAFF")
+	}
+
+	if u.userRepo == nil {
+		return nil, exception.Internal("user repository not configured", nil)
+	}
+	targetUser, err := u.userRepo.FindByID(ctx, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if targetUser == nil {
+		return nil, exception.NotFound("target user not found")
+	}
+	if targetUser.Status != entity.UserStatusActive {
+		return nil, exception.UnprocessableEntity("target user must have ACTIVE status")
+	}
+
+	targetRoleName := ""
+	if targetUser.RoleID != nil && u.roleRepo != nil {
+		role, err := u.roleRepo.FindByID(ctx, *targetUser.RoleID)
+		if err != nil {
+			return nil, err
+		}
+		if role != nil {
+			targetRoleName = strings.ToUpper(role.Name)
+		}
+	}
+
+	var orgNamePtr *string
+	switch roleInEvent {
+	case entity.EventRoleStaff:
+		if targetRoleName != "STAFF" {
+			return nil, exception.UnprocessableEntity("target user must have STAFF role")
+		}
+		if u.organizerRepo == nil {
+			return nil, exception.Internal("organizer repository not configured", nil)
+		}
+		owned, err := u.organizerRepo.IsStaffOfOrganizer(ctx, organizerID, targetUserID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			return nil, exception.Forbidden("target staff does not belong to your organization")
+		}
+	case entity.EventRoleCoOrganizer:
+		if targetUserID == organizerID {
+			return nil, exception.BadRequest("lead organizer cannot be assigned as CO_ORGANIZER")
+		}
+		if targetRoleName != "ORGANIZER" {
+			return nil, exception.UnprocessableEntity("target user must have ORGANIZER role")
+		}
+		if u.organizerRepo != nil {
+			if profile, err := u.organizerRepo.FindByUserID(ctx, targetUserID); err == nil && profile != nil {
+				orgName := profile.OrgName
+				orgNamePtr = &orgName
+			}
+		}
+	}
+
+	exists, err := u.eventRepo.IsTeamMember(ctx, eventID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, exception.Conflict("user is already assigned to this event team")
+	}
+
+	member := &entity.EventOrganizer{
+		ID:          uuid.New(),
+		EventID:     eventID,
+		UserID:      targetUserID,
+		RoleInEvent: roleInEvent,
+		AssignedAt:  time.Now(),
+	}
+	if err := u.eventRepo.AddTeamMember(ctx, member); err != nil {
+		return nil, err
+	}
+
+	return &response.EventTeamMemberResponse{
+		ID:          member.ID,
+		EventID:     member.EventID,
+		UserID:      member.UserID,
+		Name:        targetUser.Name,
+		Email:       targetUser.Email,
+		OrgName:     orgNamePtr,
+		AvatarURL:   targetUser.AvatarURL,
+		RoleInEvent: member.RoleInEvent,
+		Status:      targetUser.Status,
+		AssignedAt:  member.AssignedAt,
+	}, nil
+}
+
+// RemoveEventTeam unassigns a CO_ORGANIZER or STAFF member from an event (F-4.4).
+func (u *EventUsecase) RemoveEventTeam(ctx context.Context, organizerID, eventID, targetUserID uuid.UUID) error {
+	ev, err := u.eventRepo.FindByID(ctx, eventID)
+	if err != nil {
+		return err
+	}
+	if ev == nil {
+		return exception.NotFound("event not found")
+	}
+	if ev.OrganizerID != organizerID {
+		return exception.Forbidden("only the lead organizer can remove event team members")
+	}
+
+	removed, err := u.eventRepo.RemoveTeamMember(ctx, eventID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return exception.NotFound("team member not found in this event")
+	}
+	return nil
+}

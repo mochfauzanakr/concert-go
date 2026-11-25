@@ -444,6 +444,7 @@ func TestEventUsecase_F42_EventLifecycle(t *testing.T) {
 			t.Fatalf("failed creating second event: %v", err)
 		}
 
+		// Verify lead sees their own event (1) before co-org assignment
 		listBefore, err := uc.GetOrganizerEvents(ctx, leadID, request.GetOrganizerEventListRequest{})
 		if err != nil || listBefore.Pagination.TotalRecords != 1 {
 			t.Fatalf("expected 1 event for leadID, got total=%d err=%v", listBefore.Pagination.TotalRecords, err)
@@ -525,6 +526,121 @@ func TestEventUsecase_F43_ArtistAndLineup(t *testing.T) {
 		var appErr *exception.AppException
 		if !errors.As(err, &appErr) || appErr.Code != 404 {
 			t.Fatalf("expected 404 on removing absent artist, got %v", err)
+		}
+	})
+}
+
+func TestEventUsecase_F44_EventTeam(t *testing.T) {
+	ctx := context.Background()
+	uc, eventRepo, organizerRepo, userRepo, roleRepo := setupEventUsecase()
+
+	leadID := uuid.New()
+	otherOrgID := uuid.New()
+	ownedStaffID := uuid.New()
+	otherStaffID := uuid.New()
+	suspendedStaffID := uuid.New()
+	buyerID := uuid.New()
+
+	orgRole, _ := roleRepo.FindByName(ctx, "ORGANIZER")
+	staffRole, _ := roleRepo.FindByName(ctx, "STAFF")
+	userRole, _ := roleRepo.FindByName(ctx, "USER")
+
+	_ = organizerRepo.Upsert(ctx, &entity.OrganizerProfile{UserID: leadID, OrgName: "Lead EO"})
+	_ = organizerRepo.Upsert(ctx, &entity.OrganizerProfile{UserID: otherOrgID, OrgName: "Partner EO"})
+
+	_ = userRepo.Create(ctx, &entity.User{ID: leadID, Name: "Lead", Email: "lead@eo.test", RoleID: &orgRole.ID, Status: entity.UserStatusActive})
+	_ = userRepo.Create(ctx, &entity.User{ID: otherOrgID, Name: "Partner", Email: "partner@eo.test", RoleID: &orgRole.ID, Status: entity.UserStatusActive})
+	_ = userRepo.Create(ctx, &entity.User{ID: ownedStaffID, Name: "Owned Staff", Email: "staff1@eo.test", RoleID: &staffRole.ID, Status: entity.UserStatusActive})
+	_ = userRepo.Create(ctx, &entity.User{ID: otherStaffID, Name: "Foreign Staff", Email: "staff2@eo.test", RoleID: &staffRole.ID, Status: entity.UserStatusActive})
+	_ = userRepo.Create(ctx, &entity.User{ID: suspendedStaffID, Name: "Suspended Staff", Email: "staff3@eo.test", RoleID: &staffRole.ID, Status: entity.UserStatusSuspended})
+	_ = userRepo.Create(ctx, &entity.User{ID: buyerID, Name: "Buyer", Email: "buyer@eo.test", RoleID: &userRole.ID, Status: entity.UserStatusActive})
+
+	_ = organizerRepo.AddStaff(ctx, leadID, ownedStaffID)
+	_ = organizerRepo.AddStaff(ctx, leadID, suspendedStaffID)
+	_ = organizerRepo.AddStaff(ctx, otherOrgID, otherStaffID)
+
+	ev := &entity.Event{
+		ID:            uuid.New(),
+		OrganizerID:   leadID,
+		Name:          "Team Event",
+		Description:   "Event for team test",
+		Category:      "Pop",
+		City:          "Jakarta",
+		Location:      "Senayan",
+		StartTime:     time.Now().Add(48 * time.Hour),
+		EndTime:       time.Now().Add(54 * time.Hour),
+		Status:        entity.EventStatusPublished,
+		InventoryMode: entity.InventoryModeOnlineOnly,
+	}
+	eventRepo.SeedEvent(ev)
+
+	t.Run("STAFF assignment enforces ownership, active status, and no duplicates", func(t *testing.T) {
+		var appErr *exception.AppException
+
+		_, err := uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: otherStaffID.String(), RoleInEvent: "STAFF"})
+		if !errors.As(err, &appErr) || appErr.Code != 403 {
+			t.Fatalf("expected 403 for unowned staff, got %v", err)
+		}
+
+		_, err = uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: suspendedStaffID.String(), RoleInEvent: "STAFF"})
+		if !errors.As(err, &appErr) || appErr.Code != 422 {
+			t.Fatalf("expected 422 for suspended staff, got %v", err)
+		}
+
+		res, err := uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: ownedStaffID.String(), RoleInEvent: "STAFF"})
+		if err != nil || res.RoleInEvent != entity.EventRoleStaff {
+			t.Fatalf("expected STAFF assignment success, got res=%+v err=%v", res, err)
+		}
+
+		_, err = uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: ownedStaffID.String(), RoleInEvent: "STAFF"})
+		if !errors.As(err, &appErr) || appErr.Code != 409 {
+			t.Fatalf("expected 409 for duplicate assignment, got %v", err)
+		}
+	})
+
+	t.Run("CO_ORGANIZER assignment rejects self and non-organizer, allows active organizer, and shows in GetOrganizerEvents", func(t *testing.T) {
+		var appErr *exception.AppException
+
+		_, err := uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: leadID.String(), RoleInEvent: "CO_ORGANIZER"})
+		if !errors.As(err, &appErr) || appErr.Code != 400 {
+			t.Fatalf("expected 400 for self CO_ORGANIZER, got %v", err)
+		}
+
+		_, err = uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: buyerID.String(), RoleInEvent: "CO_ORGANIZER"})
+		if !errors.As(err, &appErr) || appErr.Code != 422 {
+			t.Fatalf("expected 422 for non-organizer CO_ORGANIZER, got %v", err)
+		}
+
+		res, err := uc.AssignEventTeam(ctx, leadID, ev.ID, request.AssignEventTeamRequest{UserID: otherOrgID.String(), RoleInEvent: "CO_ORGANIZER"})
+		if err != nil || res.OrgName == nil || *res.OrgName != "Partner EO" {
+			t.Fatalf("expected CO_ORGANIZER Partner EO, got res=%+v err=%v", res, err)
+		}
+
+		coOrgEvents, err := uc.GetOrganizerEvents(ctx, otherOrgID, request.GetOrganizerEventListRequest{})
+		if err != nil || coOrgEvents.Pagination.TotalRecords != 1 || coOrgEvents.Items[0].ID != ev.ID {
+			t.Fatalf("expected co-organizer to see assigned event in GetOrganizerEvents, got %+v err=%v", coOrgEvents, err)
+		}
+	})
+
+	t.Run("GetEventTeam and RemoveEventTeam enforce lead organizer ownership", func(t *testing.T) {
+		var appErr *exception.AppException
+
+		_, err := uc.GetEventTeam(ctx, otherOrgID, ev.ID)
+		if !errors.As(err, &appErr) || appErr.Code != 403 {
+			t.Fatalf("expected 403 for co-organizer viewing team management endpoint, got %v", err)
+		}
+
+		team, err := uc.GetEventTeam(ctx, leadID, ev.ID)
+		if err != nil || len(team) != 2 {
+			t.Fatalf("expected 2 team members, got len=%d err=%v", len(team), err)
+		}
+
+		if err := uc.RemoveEventTeam(ctx, leadID, ev.ID, ownedStaffID); err != nil {
+			t.Fatalf("expected RemoveEventTeam success, got %v", err)
+		}
+		teamAfter, _ := uc.GetEventTeam(ctx, leadID, ev.ID)
+		if len(teamAfter) != 1 {
+			t.Errorf("expected 1 team member remaining, got %d", len(teamAfter))
 		}
 	})
 }
