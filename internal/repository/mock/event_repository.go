@@ -108,6 +108,9 @@ func (m *EventRepositoryMock) FindAll(ctx context.Context, filter repository.Eve
 		if filter.Status != "" && ev.Status != filter.Status {
 			continue
 		}
+		if filter.ManagedByUserID != nil && !m.isEventManagerLocked(ev, *filter.ManagedByUserID) {
+			continue
+		}
 		if cityLower != "" && strings.ToLower(ev.City) != cityLower {
 			continue
 		}
@@ -178,6 +181,18 @@ func (m *EventRepositoryMock) FindAll(ctx context.Context, filter repository.Eve
 	return filtered[start:end], total, nil
 }
 
+func (m *EventRepositoryMock) isEventManagerLocked(ev *entity.Event, userID uuid.UUID) bool {
+	if ev.OrganizerID == userID {
+		return true
+	}
+	for _, co := range m.coOrganizers[ev.ID] {
+		if co.UserID == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *EventRepositoryMock) FindByID(ctx context.Context, id uuid.UUID) (*entity.Event, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -187,6 +202,53 @@ func (m *EventRepositoryMock) FindByID(ctx context.Context, id uuid.UUID) (*enti
 		return &copyEv, nil
 	}
 	return nil, nil
+}
+
+func (m *EventRepositoryMock) Create(ctx context.Context, event *entity.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	if event.ID == uuid.Nil {
+		event.ID = uuid.New()
+	}
+	if event.Status == "" {
+		event.Status = entity.EventStatusDraft
+	}
+	if event.InventoryMode == "" {
+		event.InventoryMode = entity.InventoryModeOnlineOnly
+	}
+	event.CreatedAt = now
+	event.UpdatedAt = now
+	copyEv := *event
+	m.events[event.ID] = &copyEv
+	return nil
+}
+
+func (m *EventRepositoryMock) Update(ctx context.Context, event *entity.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.events[event.ID]
+	if !ok || existing.DeletedAt.Valid {
+		return nil
+	}
+	event.CreatedAt = existing.CreatedAt
+	event.UpdatedAt = time.Now()
+	copyEv := *event
+	m.events[event.ID] = &copyEv
+	return nil
+}
+
+func (m *EventRepositoryMock) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if ev, ok := m.events[id]; ok && !ev.DeletedAt.Valid {
+		ev.Status = status
+		ev.UpdatedAt = time.Now()
+	}
+	return nil
 }
 
 func (m *EventRepositoryMock) FindArtistsByEventID(ctx context.Context, eventID uuid.UUID) ([]*entity.Artist, error) {

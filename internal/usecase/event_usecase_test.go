@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"mime/multipart"
 	"testing"
 	"time"
 
@@ -17,17 +18,18 @@ import (
 	"github.com/google/uuid"
 )
 
-func setupEventUsecase() (*usecase.EventUsecase, *mock.EventRepositoryMock, repository.OrganizerRepository, repository.UserRepository) {
+func setupEventUsecase() (*usecase.EventUsecase, *mock.EventRepositoryMock, repository.OrganizerRepository, repository.UserRepository, repository.RoleRepository) {
 	eventRepo := mock.NewEventRepositoryMock()
 	organizerRepo := mock.NewOrganizerRepositoryMock()
 	userRepo := mock.NewUserRepositoryMock()
-	uc := usecase.NewEventUsecase(eventRepo, organizerRepo, userRepo)
-	return uc, eventRepo, organizerRepo, userRepo
+	roleRepo := mock.NewRoleRepositoryMock()
+	uc := usecase.NewEventUsecase(eventRepo, organizerRepo, userRepo, roleRepo, &mockStorageService{})
+	return uc, eventRepo, organizerRepo, userRepo, roleRepo
 }
 
 func TestEventUsecase_GetPublicEvents(t *testing.T) {
 	ctx := context.Background()
-	uc, eventRepo, _, _ := setupEventUsecase()
+	uc, eventRepo, _, _, _ := setupEventUsecase()
 
 	orgID := uuid.New()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -194,7 +196,7 @@ func TestEventUsecase_GetPublicEvents(t *testing.T) {
 
 func TestEventUsecase_GetPublicEventDetail(t *testing.T) {
 	ctx := context.Background()
-	uc, eventRepo, organizerRepo, userRepo := setupEventUsecase()
+	uc, eventRepo, organizerRepo, userRepo, _ := setupEventUsecase()
 
 	leadUserID := uuid.New()
 	logo := "https://cdn.example.com/org-logo.png"
@@ -321,5 +323,131 @@ func TestEventUsecase_GetPublicEventDetail(t *testing.T) {
 		if detail.LeadOrganizer == nil || detail.LeadOrganizer.OrgName != "Fallback Organizer" {
 			t.Fatalf("expected fallback LeadOrganizer name, got %+v", detail.LeadOrganizer)
 		}
+	})
+}
+
+func TestEventUsecase_F42_EventLifecycle(t *testing.T) {
+	ctx := context.Background()
+	uc, _, organizerRepo, _, _ := setupEventUsecase()
+
+	leadID := uuid.New()
+	otherOrgID := uuid.New()
+	start := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	end := start.Add(5 * time.Hour)
+
+	validReq := request.UpsertEventRequest{
+		Name:          "Soundwave 2026",
+		Description:   "Mainstream music festival",
+		Category:      "Festival",
+		City:          "Jakarta",
+		Location:      "GBK Senayan",
+		StartTime:     start.Format(time.RFC3339),
+		EndTime:       end.Format(time.RFC3339),
+		InventoryMode: entity.InventoryModeDualChannel,
+	}
+
+	t.Run("CreateEvent rejects organizer without completed profile (422)", func(t *testing.T) {
+		_, err := uc.CreateEvent(ctx, leadID, validReq, nil)
+		var appErr *exception.AppException
+		if !errors.As(err, &appErr) || appErr.Code != 422 {
+			t.Fatalf("expected 422 AppException, got %v", err)
+		}
+	})
+
+	_ = organizerRepo.Upsert(ctx, &entity.OrganizerProfile{
+		UserID:  leadID,
+		OrgName: "Soundwave Live",
+	})
+	_ = organizerRepo.Upsert(ctx, &entity.OrganizerProfile{
+		UserID:  otherOrgID,
+		OrgName: "Other Promotor",
+	})
+
+	t.Run("CreateEvent validates endTime > startTime and inventoryMode", func(t *testing.T) {
+		badTime := validReq
+		badTime.EndTime = start.Add(-1 * time.Hour).Format(time.RFC3339)
+		if _, err := uc.CreateEvent(ctx, leadID, badTime, nil); err == nil {
+			t.Fatal("expected error when endTime <= startTime")
+		}
+
+		badMode := validReq
+		badMode.InventoryMode = "INVALID_MODE"
+		if _, err := uc.CreateEvent(ctx, leadID, badMode, nil); err == nil {
+			t.Fatal("expected error for invalid inventoryMode")
+		}
+	})
+
+	var createdEventID uuid.UUID
+	t.Run("CreateEvent succeeds with DRAFT status and uploads banner", func(t *testing.T) {
+		banner := &multipart.FileHeader{Filename: "banner.jpg", Size: 1024}
+		res, err := uc.CreateEvent(ctx, leadID, validReq, banner)
+		if err != nil {
+			t.Fatalf("expected CreateEvent success, got %v", err)
+		}
+		if res.Status != entity.EventStatusDraft {
+			t.Errorf("expected DRAFT status, got %s", res.Status)
+		}
+		if res.BannerURL == nil || *res.BannerURL == "" {
+			t.Errorf("expected bannerUrl to be populated")
+		}
+		createdEventID = res.ID
+	})
+
+	t.Run("UpdateEvent rejects non-lead organizer (403) and succeeds for lead", func(t *testing.T) {
+		updateReq := validReq
+		updateReq.Name = "Soundwave 2026 Updated"
+		_, err := uc.UpdateEvent(ctx, otherOrgID, createdEventID, updateReq, nil)
+		var appErr *exception.AppException
+		if !errors.As(err, &appErr) || appErr.Code != 403 {
+			t.Fatalf("expected 403 AppException, got %v", err)
+		}
+
+		res, err := uc.UpdateEvent(ctx, leadID, createdEventID, updateReq, nil)
+		if err != nil {
+			t.Fatalf("expected UpdateEvent success, got %v", err)
+		}
+		if res.Name != "Soundwave 2026 Updated" {
+			t.Errorf("expected updated name, got %s", res.Name)
+		}
+	})
+
+	t.Run("UpdateEventStatus transitions DRAFT -> PUBLISHED -> COMPLETED and enforces lead ownership", func(t *testing.T) {
+		_, err := uc.UpdateEventStatus(ctx, otherOrgID, createdEventID, request.UpdateEventStatusRequest{Status: "PUBLISHED"})
+		var appErr *exception.AppException
+		if !errors.As(err, &appErr) || appErr.Code != 403 {
+			t.Fatalf("expected 403 AppException, got %v", err)
+		}
+
+		res, err := uc.UpdateEventStatus(ctx, leadID, createdEventID, request.UpdateEventStatusRequest{Status: "PUBLISHED"})
+		if err != nil || res.Status != entity.EventStatusPublished {
+			t.Fatalf("expected PUBLISHED status, got res=%+v err=%v", res, err)
+		}
+
+		res, err = uc.UpdateEventStatus(ctx, leadID, createdEventID, request.UpdateEventStatusRequest{Status: "COMPLETED"})
+		if err != nil || res.Status != entity.EventStatusCompleted {
+			t.Fatalf("expected COMPLETED status, got res=%+v err=%v", res, err)
+		}
+	})
+
+	t.Run("GetOrganizerEvents returns lead and co-organizer events across all statuses", func(t *testing.T) {
+		otherDraft, err := uc.CreateEvent(ctx, otherOrgID, request.UpsertEventRequest{
+			Name:          "Partner Co-Hosted Gig",
+			Description:   "Co-hosted gig",
+			Category:      "Indie",
+			City:          "Bandung",
+			Location:      "Dago",
+			StartTime:     start.Add(24 * time.Hour).Format(time.RFC3339),
+			EndTime:       end.Add(24 * time.Hour).Format(time.RFC3339),
+			InventoryMode: entity.InventoryModeOnlineOnly,
+		}, nil)
+		if err != nil {
+			t.Fatalf("failed creating second event: %v", err)
+		}
+
+		listBefore, err := uc.GetOrganizerEvents(ctx, leadID, request.GetOrganizerEventListRequest{})
+		if err != nil || listBefore.Pagination.TotalRecords != 1 {
+			t.Fatalf("expected 1 event for leadID, got total=%d err=%v", listBefore.Pagination.TotalRecords, err)
+		}
+		_ = otherDraft
 	})
 }

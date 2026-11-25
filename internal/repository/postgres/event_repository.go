@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"concert-go/internal/domain/entity"
 	"concert-go/internal/domain/model"
@@ -33,6 +34,14 @@ func (r *eventRepositoryImpl) FindAll(ctx context.Context, filter repository.Eve
 		where = append(where, fmt.Sprintf("e.status = $%d", argIdx))
 		args = append(args, filter.Status)
 		argIdx++
+	}
+	if filter.ManagedByUserID != nil {
+		where = append(where, fmt.Sprintf(
+			"(e.organizer_id = $%d OR EXISTS (SELECT 1 FROM event_organizers eo WHERE eo.event_id = e.id AND eo.user_id = $%d AND eo.role_in_event = $%d))",
+			argIdx, argIdx, argIdx+1,
+		))
+		args = append(args, *filter.ManagedByUserID, entity.EventRoleCoOrganizer)
+		argIdx += 2
 	}
 	if filter.City != "" {
 		where = append(where, fmt.Sprintf("LOWER(e.city) = LOWER($%d)", argIdx))
@@ -130,6 +139,81 @@ func (r *eventRepositoryImpl) FindByID(ctx context.Context, id uuid.UUID) (*enti
 	`
 	row := execer(ctx, r.db).QueryRowContext(ctx, query, id)
 	return scanEvent(row)
+}
+
+func (r *eventRepositoryImpl) Create(ctx context.Context, event *entity.Event) error {
+	now := time.Now()
+	if event.ID == uuid.Nil {
+		event.ID = uuid.New()
+	}
+	if event.Status == "" {
+		event.Status = entity.EventStatusDraft
+	}
+	if event.InventoryMode == "" {
+		event.InventoryMode = entity.InventoryModeOnlineOnly
+	}
+	event.CreatedAt = now
+	event.UpdatedAt = now
+
+	query := `
+		INSERT INTO events (id, organizer_id, name, description, banner_url, category, city, location, start_time, end_time, status, inventory_mode, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+	`
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
+		event.ID,
+		event.OrganizerID,
+		event.Name,
+		event.Description,
+		event.BannerURL,
+		event.Category,
+		event.City,
+		event.Location,
+		event.StartTime,
+		event.EndTime,
+		event.Status,
+		event.InventoryMode,
+		event.CreatedAt,
+		event.UpdatedAt,
+	)
+	if err != nil {
+		log.Printf("[SQL Error - Event Create] %v", err)
+	}
+	return err
+}
+
+func (r *eventRepositoryImpl) Update(ctx context.Context, event *entity.Event) error {
+	event.UpdatedAt = time.Now()
+	query := `
+		UPDATE events
+		SET name = $1, description = $2, banner_url = $3, category = $4, city = $5, location = $6, start_time = $7, end_time = $8, inventory_mode = $9, updated_at = $10
+		WHERE id = $11 AND deleted_at IS NULL
+	`
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
+		event.Name,
+		event.Description,
+		event.BannerURL,
+		event.Category,
+		event.City,
+		event.Location,
+		event.StartTime,
+		event.EndTime,
+		event.InventoryMode,
+		event.UpdatedAt,
+		event.ID,
+	)
+	if err != nil {
+		log.Printf("[SQL Error - Event Update] %v", err)
+	}
+	return err
+}
+
+func (r *eventRepositoryImpl) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+	query := `UPDATE events SET status = $1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL`
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, status, time.Now(), id)
+	if err != nil {
+		log.Printf("[SQL Error - Event UpdateStatus] %v", err)
+	}
+	return err
 }
 
 func (r *eventRepositoryImpl) FindArtistsByEventID(ctx context.Context, eventID uuid.UUID) ([]*entity.Artist, error) {

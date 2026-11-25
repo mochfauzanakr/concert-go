@@ -43,7 +43,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, tx, emailSender, storageService, cfg)
 	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, emailSender, storageService, cfg)
-	eventUsecase := usecase.NewEventUsecase(eventRepo, organizerRepo, userRepo)
+	eventUsecase := usecase.NewEventUsecase(eventRepo, organizerRepo, userRepo, roleRepo, storageService)
 
 	helloHandler := handler.NewHelloHandler(helloUsecase)
 	roleHandler := handler.NewRoleHandler(roleUsecase)
@@ -59,7 +59,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		RoleRoute(api, roleHandler)
 		UserRoute(api, userHandler, cfg.JWTSecret, roleRepo)
 		OrganizerRoute(api, organizerHandler, cfg.JWTSecret, roleRepo, rateLimiter)
-		EventRoute(api, eventHandler)
+		EventRoute(api, eventHandler, cfg.JWTSecret, roleRepo)
 
 		// TODO: delete it in when it goes to main
 		DevRoute(api, cfg)
