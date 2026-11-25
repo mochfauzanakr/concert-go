@@ -32,7 +32,7 @@ func (r *sessionRepositoryImpl) Create(ctx context.Context, session *entity.Sess
 	}
 	session.CreatedAt = now
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
 		session.ID,
 		session.UserID,
 		session.TokenHash,
@@ -51,7 +51,7 @@ func (r *sessionRepositoryImpl) FindByTokenHash(ctx context.Context, tokenHash s
 		WHERE token_hash = $1
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, tokenHash)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, tokenHash)
 
 	var s entity.Session
 	var revokedAt sql.NullTime
@@ -85,7 +85,7 @@ func (r *sessionRepositoryImpl) Revoke(ctx context.Context, tokenHash string) er
 		SET revoked_at = $1
 		WHERE token_hash = $2 AND revoked_at IS NULL
 	`
-	_, err := r.db.ExecContext(ctx, query, time.Now(), tokenHash)
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, time.Now(), tokenHash)
 	return err
 }
 
@@ -95,6 +95,6 @@ func (r *sessionRepositoryImpl) RevokeByUserID(ctx context.Context, userID uuid.
 		SET revoked_at = $1
 		WHERE user_id = $2 AND revoked_at IS NULL
 	`
-	_, err := r.db.ExecContext(ctx, query, time.Now(), userID)
+	_, err := execer(ctx, r.db).ExecContext(ctx, query, time.Now(), userID)
 	return err
 }

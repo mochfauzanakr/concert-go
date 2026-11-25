@@ -31,6 +31,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	sessionRepo := postgres.NewSessionRepository(config.SqlDB)
 	inviteRepo := postgres.NewInviteRepository(config.SqlDB)
 	organizerRepo := postgres.NewOrganizerRepository(config.SqlDB)
+	tx := postgres.NewTransactor(config.SqlDB)
 	otpRepo := redis.NewOTPRepository(config.RedisClient)
 	emailSender := util.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
 	storageService := util.NewStorageService(cfg)
@@ -39,7 +40,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	helloUsecase := usecase.NewHelloUsecase(helloRepo)
 	roleUsecase := usecase.NewRoleUsecase(roleRepo)
 	authUsecase := usecase.NewAuthUsecase(userRepo, sessionRepo, otpRepo, roleRepo, emailSender, cfg)
-	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, emailSender, storageService, cfg)
+	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, inviteRepo, sessionRepo, organizerRepo, tx, emailSender, storageService, cfg)
 	organizerUsecase := usecase.NewOrganizerUsecase(organizerRepo, userRepo, inviteRepo, roleRepo, sessionRepo, emailSender, storageService, cfg)
 
 	helloHandler := handler.NewHelloHandler(helloUsecase)

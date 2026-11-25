@@ -43,7 +43,7 @@ func (r *userRepositoryImpl) Create(ctx context.Context, user *entity.User) erro
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
 		user.ID,
 		user.RoleID,
 		user.Name,
@@ -72,7 +72,7 @@ func (r *userRepositoryImpl) Update(ctx context.Context, user *entity.User) erro
 		user.Status = entity.UserStatusActive
 	}
 	user.UpdatedAt = time.Now()
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := execer(ctx, r.db).ExecContext(ctx, query,
 		user.RoleID,
 		user.Name,
 		user.Email,
@@ -97,7 +97,7 @@ func (r *userRepositoryImpl) FindByEmail(ctx context.Context, email string) (*en
 		WHERE email = $1 AND deleted_at IS NULL
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, email)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, email)
 	return scanUser(row)
 }
 
@@ -108,7 +108,7 @@ func (r *userRepositoryImpl) FindByID(ctx context.Context, id uuid.UUID) (*entit
 		WHERE id = $1 AND deleted_at IS NULL
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, id)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, id)
 	return scanUser(row)
 }
 
@@ -119,7 +119,7 @@ func (r *userRepositoryImpl) FindByProvider(ctx context.Context, provider, provi
 		WHERE provider = $1 AND provider_id = $2 AND deleted_at IS NULL
 		LIMIT 1
 	`
-	row := r.db.QueryRowContext(ctx, query, provider, providerID)
+	row := execer(ctx, r.db).QueryRowContext(ctx, query, provider, providerID)
 	return scanUser(row)
 }
 
@@ -168,7 +168,7 @@ func (r *userRepositoryImpl) FindAll(ctx context.Context, filter repository.User
 
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users WHERE %s", whereClause)
 	var total int
-	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+	err := execer(ctx, r.db).QueryRowContext(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
 		log.Printf("[SQL Error - Count Users] %v", err)
 		return nil, 0, err
@@ -197,7 +197,7 @@ func (r *userRepositoryImpl) FindAll(ctx context.Context, filter repository.User
 	}
 	dataArgs := append(args, limit, filter.Offset)
 
-	rows, err := r.db.QueryContext(ctx, dataQuery, dataArgs...)
+	rows, err := execer(ctx, r.db).QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
 		log.Printf("[SQL Error - Query Users] %v", err)
 		return nil, 0, err
