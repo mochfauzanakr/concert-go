@@ -147,23 +147,21 @@ func (m *EventRepositoryMock) FindAll(ctx context.Context, filter repository.Eve
 	asc := strings.EqualFold(strings.TrimSpace(filter.SortOrder), "ASC")
 	sortBy := strings.ToLower(strings.TrimSpace(filter.SortBy))
 	sort.Slice(filtered, func(i, j int) bool {
-		var less bool
+		if !asc {
+			i, j = j, i
+		}
 		switch sortBy {
 		case "starttime", "start_time":
-			less = filtered[i].StartTime.Before(filtered[j].StartTime)
+			return filtered[i].StartTime.Before(filtered[j].StartTime)
 		case "name":
-			less = strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+			return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
 		case "city":
-			less = strings.ToLower(filtered[i].City) < strings.ToLower(filtered[j].City)
+			return strings.ToLower(filtered[i].City) < strings.ToLower(filtered[j].City)
 		case "category":
-			less = strings.ToLower(filtered[i].Category) < strings.ToLower(filtered[j].Category)
+			return strings.ToLower(filtered[i].Category) < strings.ToLower(filtered[j].Category)
 		default:
-			less = filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+			return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
 		}
-		if asc {
-			return less
-		}
-		return !less
 	})
 
 	total := len(filtered)
@@ -299,17 +297,15 @@ func (m *EventRepositoryMock) FindAllArtists(ctx context.Context, filter reposit
 	asc := strings.EqualFold(strings.TrimSpace(filter.SortOrder), "ASC")
 	sortBy := strings.ToLower(strings.TrimSpace(filter.SortBy))
 	sort.Slice(filtered, func(i, j int) bool {
-		var less bool
+		if !asc {
+			i, j = j, i
+		}
 		switch sortBy {
 		case "name":
-			less = strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+			return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
 		default:
-			less = filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+			return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
 		}
-		if asc {
-			return less
-		}
-		return !less
 	})
 
 	total := len(filtered)
